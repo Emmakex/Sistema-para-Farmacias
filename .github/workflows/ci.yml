@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -10,5 +11,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: PHP syntax
+        run: find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Country-neutral core guard
+        shell: bash
         run: |
-          find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l
+          set -euo pipefail
+          violations="$(grep -RInE 'S/|SUNAT|Yape|Plin|\bIGV\b|\bRUC\b|\bDNI\b' \
+            --include='*.php' \
+            --exclude='class-spf-country-peru.php' \
+            --exclude-dir='.git' \
+            . || true)"
+          if [ -n "$violations" ]; then
+            echo "Country-specific literals found outside country packs:"
+            echo "$violations"
+            exit 1
+          fi
