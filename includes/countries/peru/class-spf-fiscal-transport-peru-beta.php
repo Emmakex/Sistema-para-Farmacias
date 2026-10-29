@@ -11,7 +11,7 @@ if (class_exists('SoapClient') && !class_exists('SPF_Fiscal_Peru_Beta_Soap_Clien
             $this->spf_password = (string) $password;
         }
 
-        public function __doRequest($request, $location, $action, $version, $one_way = 0) {
+        public function __doRequest($request, $location, $action, $version, $one_way = false): ?string {
             $doc = new DOMDocument('1.0', 'UTF-8');
             $doc->preserveWhiteSpace = false;
             if (!$doc->loadXML((string) $request, LIBXML_NONET)) {
