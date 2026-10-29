@@ -47,6 +47,16 @@ final class SPF_Country_Peru {
                         'customization_id'=>'1.1',
                         'identifier_prefix'=>'RC',
                         'preview_sequence'=>1,
+                        'signature_profile'=>[
+                            'signature_id'=>'signatureSPFBatch',
+                        ],
+                        'validation_profile'=>[
+                            'validator'=>'xsd_xsl_local',
+                            'xsd_path_key'=>'SPF_FISCAL_PERU_SUMMARY_XSD_PATH',
+                            'xsl_path_key'=>'SPF_FISCAL_PERU_SUMMARY_XSL_PATH',
+                            'filename_parameter'=>'nombreArchivoEnviado',
+                            'resources'=>'external_official_summary_pack',
+                        ],
                         'remote_operation'=>'pending',
                     ],
                 ],
