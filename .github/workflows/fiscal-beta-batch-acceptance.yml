@@ -39,6 +39,15 @@ jobs:
           grep -Fq "'archive_manifest'" "$acceptance"
           grep -Fq "'projection'" "$acceptance"
           grep -Fq "'production_isolated'" "$acceptance"
+      - name: Effective submit precedes the ticket
+        shell: bash
+        run: |
+          set -euo pipefail
+          acceptance='includes/class-spf-fiscal-beta-batch-acceptance.php'
+          grep -Fq "!== 'submit_intent'" "$acceptance"
+          grep -Fq '$event_id($event) >= $event_id($ticket_event)' "$acceptance"
+          grep -Fq '$submit = $event' "$acceptance"
+          grep -Fq '$event_id($submit) < $event_id($ticket_event)' "$acceptance"
       - name: Final poll is bound to its own preceding intent
         shell: bash
         run: |
