@@ -32,7 +32,7 @@ jobs:
           grep -Fq "'runtime_openssl'" "$readiness"
           grep -Fq "'runtime_dom'" "$readiness"
           grep -Fq "'runtime_zip'" "$readiness"
-          grep -Fq "'runtime_soap'" "$readiness"
+          grep -Fq "'runtime_remote_transport'" "$readiness"
           grep -Fq "'issuer_profile'" "$readiness"
           grep -Fq "'certificate'" "$readiness"
           grep -Fq "'invoice_xsd'" "$readiness"
@@ -49,6 +49,9 @@ jobs:
           grep -Fq "'readiness_profile'" "$country"
           grep -Fq "'required_fields'" "$country"
           grep -Fq "'tax_id_pattern'" "$country"
+          grep -Fq "'transport_runtime'" "$country"
+          grep -Fq "'extension'=>'soap'" "$country"
+          grep -Fq 'extension_loaded($runtime_extension)' "$readiness"
           grep -Fq "SPF_Fiscal_Evidence_Manager::status" "$readiness"
           grep -Fq "SPF_Fiscal_Batch_Lifecycle::validation_resources" "$readiness"
           grep -Fq "SPF_Fiscal_Document_Remote_Event_Repository::table" "$readiness"
@@ -58,8 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           readiness='includes/class-spf-fiscal-beta-readiness.php'
-          if grep -En 'RUC|SUNAT|Yape|Plin|\bIGV\b|\bDNI\b|\\d\{11\}' "$readiness"; then
-            echo 'Country-specific readiness policy leaked into generic fiscal core'
+          if grep -En 'RUC|SUNAT|Yape|Plin|\bIGV\b|\bDNI\b|\\d\{11\}|SoapClient|__soapCall' "$readiness"; then
+            echo 'Country or transport-specific readiness policy leaked into generic fiscal core'
             exit 1
           fi
       - name: Readiness remains local and secret-safe
@@ -67,8 +70,8 @@ jobs:
         run: |
           set -euo pipefail
           readiness='includes/class-spf-fiscal-beta-readiness.php'
-          if grep -En '__soapCall|wp_remote_|curl_exec|fsockopen|stream_socket_client' "$readiness"; then
-            echo 'Readiness diagnostics must not perform network operations'
+          if grep -En '__soapCall|wp_remote_|curl_exec|fsockopen|stream_socket_client|SoapClient' "$readiness"; then
+            echo 'Readiness diagnostics must not perform or encode network transport operations'
             exit 1
           fi
           if grep -En 'private_key_pem.*echo|certificate_pem.*echo|SPF_FISCAL_P12_PASSWORD.*echo|SPF_FISCAL_P12_PATH.*echo' "$readiness"; then
