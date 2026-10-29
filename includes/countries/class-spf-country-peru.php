@@ -34,6 +34,12 @@ final class SPF_Country_Peru {
                     'signature_id'=>'signatureSPF',
                     'remote_validation'=>'pending',
                 ],
+                'validation_profile'=>[
+                    'validator'=>'xsd_xsl_local',
+                    'filename_parameter'=>'nombreArchivoEnviado',
+                    'resources'=>'external_official_pack',
+                    'remote_validation'=>'pending',
+                ],
             ],
         ]);
     }
