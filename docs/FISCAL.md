@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.20.0**.
+La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.21.0**.
 
 El sistema mantiene separadas las responsabilidades locales, beta y productivas para impedir que una prueba remota pueda convertirse accidentalmente en autoridad fiscal real.
 
@@ -18,7 +18,8 @@ El sistema mantiene separadas las responsabilidades locales, beta y productivas 
 8. **Ledgers remotos append-only**: intención, respuesta, tickets, consultas y hashes.
 9. **Evidence Store privado**: conservación verificable de ZIP/XML CDR fuera del webroot.
 10. **Recuperación operativa**: reconstrucción de proyecciones locales desde evidencia ya archivada, sin reenvío.
-11. **Resultado fiscal productivo**: reservado para una fase posterior.
+11. **Readiness beta**: diagnóstico local fail-closed de precondiciones antes de una aceptación real de pruebas.
+12. **Resultado fiscal productivo**: reservado para una fase posterior.
 
 ## Estados independientes
 
@@ -108,15 +109,7 @@ firma + validación exactas
 → proyección beta local
 ```
 
-El ledger `SPF_Fiscal_Document_Remote_Event_Repository` queda ligado por fingerprint a:
-
-- documento/venta;
-- país y tipo fiscal;
-- serie/correlativo;
-- XML firmado;
-- certificado;
-- hash de validación;
-- transporte y entorno.
+El ledger `SPF_Fiscal_Document_Remote_Event_Repository` queda ligado por fingerprint a documento/venta, país/tipo fiscal, serie/correlativo, XML firmado, certificado, hash de validación, transporte y entorno.
 
 Si existe una respuesta remota para la misma evidencia, un nuevo `sendBill` queda bloqueado.
 
@@ -143,19 +136,43 @@ Los bytes CDR ZIP/XML no entran en `response_body`, options, transients ni ledge
 
 Si la CDR ya quedó archivada pero falla la proyección mutable del comprobante, `recover_beta_invoice()` reconstruye `beta_status`/`response_body` desde el ledger y añade `projection_recovered` sin realizar red.
 
-`SPF_Fiscal_Document_Recovery_UI` expone en la pantalla **Fiscal** únicamente candidatos en los que:
+`SPF_Fiscal_Document_Recovery_UI` expone en la pantalla **Fiscal** únicamente candidatos en los que existe `evidence_archived`, el fingerprint archivado coincide con la firma/certificado/validación actuales y el estado beta local está desalineado.
 
-1. existe `evidence_archived`;
-2. el fingerprint archivado coincide con la firma/certificado/validación actuales;
-3. el estado beta local está desalineado.
+La detección usa una consulta agrupada y `evidence_sha256_from_row()`; no reconstruye firma/validación para cada fila. Al pulsar **Recuperar desde ledger**, la autoridad server-side vuelve a ejecutar la comprobación completa antes de modificar la proyección.
 
-La detección usa una consulta agrupada y `evidence_sha256_from_row()`; no reconstruye firma/validación para cada fila de la pantalla. Al pulsar **Recuperar desde ledger**, la autoridad server-side vuelve a ejecutar la comprobación completa antes de modificar la proyección.
+## Readiness beta 0.21.0
+
+`SPF_Fiscal_Beta_Readiness` añade a la pantalla **Fiscal** un diagnóstico local, sin transmisión, con dos alcances independientes:
+
+- **Factura beta**;
+- **Resumen Diario beta**.
+
+Cada alcance se declara `LISTO` únicamente cuando pasan todas sus precondiciones. El diagnóstico comprueba:
+
+- extensiones PHP OpenSSL, DOM, ZIP y SOAP;
+- identidad mínima del emisor;
+- firmador y proveedor de credenciales registrados;
+- PKCS#12 externo legible, vigente y con clave privada;
+- validador local;
+- XSD/XSL individuales;
+- XSD/XSL del Resumen Diario;
+- Evidence Store privado disponible;
+- tablas de ambos ledgers instaladas;
+- transportes beta registrados;
+- builder del Resumen Diario;
+- opt-in explícito independiente de factura y lote;
+- producción mantenida en estado bloqueado.
+
+El diagnóstico no devuelve contraseñas, claves privadas, contenido de certificado ni rutas completas. La comprobación del PKCS#12 ocurre solo en memoria y las credenciales se descartan inmediatamente.
+
+El readiness **no envía**, **no cambia estados**, **no habilita producción** y **no sustituye la validación exacta previa a cada transmisión**. Es únicamente el gate operativo previo a una aceptación beta controlada.
 
 ## Situaciones deliberadamente bloqueadas
 
 - `response_received` sin `evidence_archived`: no se reenvía automáticamente y requiere reconciliación técnica;
 - evidencia archivada con fingerprint distinto al documento actual: no es recuperable;
 - falta de Evidence Store: un resultado beta final no se presenta como final archivado;
+- readiness incompleto: no se considera preparada la aceptación beta del alcance afectado;
 - endpoint productivo: ausente;
 - credenciales productivas: ausentes;
 - retry/polling automático remoto: ausente.
@@ -187,7 +204,8 @@ CI cubre, entre otros:
 - recuperación de ticket y de proyección sin red;
 - bloqueo de reenvíos duplicados;
 - ausencia de XML/ZIP crudos en base de datos;
-- UI de recuperación sin N+1 criptográfico.
+- UI de recuperación sin N+1 criptográfico;
+- readiness por alcance, local, no transmisor y sin exposición de secretos.
 
 ## Opt-in beta Perú
 
@@ -209,14 +227,8 @@ Estos flags habilitan exclusivamente el entorno de pruebas.
 
 ## Próximo corte
 
-Con 0.20.0 certificado, el siguiente paso será preparar una **aceptación beta real controlada** en una instalación de prueba con:
+Con 0.21.0 certificado, el siguiente paso es ejecutar una **aceptación beta real controlada** únicamente cuando el panel marque el alcance correspondiente como `LISTO`.
 
-- emisor de pruebas;
-- certificado configurado externamente;
-- XSD/XSL oficiales externos;
-- Evidence Store privado disponible;
-- factura de prueba y Resumen Diario de prueba;
-- captura completa de ambos ledgers y manifests;
-- reconciliación de estado local frente a la respuesta remota.
+La instalación de prueba deberá aportar emisor de pruebas, certificado externo, XSD/XSL oficiales externos, Evidence Store privado, factura/Resumen Diario de prueba y captura completa de ledgers y manifests para reconciliar el estado local frente a la respuesta remota.
 
-Producción continuará bloqueada hasta que esa aceptación esté documentada y, después, se definan credenciales productivas externas, idempotencia/reintentos formales, observabilidad, backup/retención y reconciliación operativa.
+Producción continuará bloqueada hasta documentar esa aceptación y definir después credenciales productivas externas, idempotencia/reintentos formales, observabilidad, backup/retención y reconciliación operativa.

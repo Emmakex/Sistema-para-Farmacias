@@ -26,6 +26,15 @@ final class SPF_Country_Peru {
                 'adapter'=>'peru',
                 'default_transport'=>'dry_run',
                 'evidence_store'=>'external_filesystem',
+                'readiness_profile'=>[
+                    'issuer'=>[
+                        'required_fields'=>['tax_id','legal_name','address'],
+                        'tax_id_pattern'=>'/^\d{11}$/',
+                    ],
+                    'transport_runtime'=>[
+                        'extension'=>'soap',
+                    ],
+                ],
                 'signature_profile'=>[
                     'signer'=>'xmldsig',
                     'credentials_provider'=>'environment_p12',

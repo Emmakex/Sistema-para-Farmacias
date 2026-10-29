@@ -3,14 +3,14 @@
  * Plugin Name: Sistema para Farmacias
  * Plugin URI: https://kairoseth.com/
  * Description: Sistema WordPress para farmacias con inventario por lotes, punto de venta, clientes, comprobantes, dashboard y arquitectura multi-país.
- * Version: 0.20.0
+ * Version: 0.21.0
  * Author: Kairoseth
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: sistema-para-farmacias
  */
 if (!defined('ABSPATH')) { exit; }
-define('SPF_VERSION','0.20.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
+define('SPF_VERSION','0.21.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
 require_once SPF_PLUGIN_DIR.'includes/class-spf-country-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/countries/class-spf-country-peru.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-config.php';
@@ -57,6 +57,7 @@ require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-document-remote-event-rep
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-document-recovery-ui.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-batch-remote-event-repository.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-batch-beta-manager.php';
+require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-beta-readiness.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-documents.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-sales.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-data-tools.php';
@@ -91,6 +92,7 @@ function spf_bootstrap(){
     $transport=new SPF_Fiscal_Transport_Manager();$transport->hooks();
     $document_recovery_ui=new SPF_Fiscal_Document_Recovery_UI();$document_recovery_ui->hooks();
     $batch_beta=new SPF_Fiscal_Batch_Beta_Manager();$batch_beta->hooks();
+    $beta_readiness=new SPF_Fiscal_Beta_Readiness();$beta_readiness->hooks();
     $sales=new SPF_Sales();$sales->hooks();
     $tools=new SPF_Data_Tools();$tools->hooks();
     $login=new SPF_Login_Branding();$login->hooks();
