@@ -39,13 +39,15 @@ jobs:
           grep -Fq "'archive_manifest'" "$acceptance"
           grep -Fq "'projection'" "$acceptance"
           grep -Fq "'production_isolated'" "$acceptance"
-      - name: Final poll is bound to its preceding intent
+      - name: Final poll is bound to its own preceding intent
         shell: bash
         run: |
           set -euo pipefail
           acceptance='includes/class-spf-fiscal-beta-batch-acceptance.php'
           grep -Fq '$event_id($event) >= $event_id($archive_event)' "$acceptance"
-          grep -Fq '$event_id($event) <= $event_id($ticket_event) || $event_id($event) >= $event_id($final_poll)' "$acceptance"
+          grep -Fq '$previous_poll_event = null' "$acceptance"
+          grep -Fq "['poll_intent','poll_result','poll_error']" "$acceptance"
+          grep -Fq "=== 'poll_intent'" "$acceptance"
           grep -Fq '$event_id($ticket_event) < $event_id($final_poll_intent)' "$acceptance"
           grep -Fq '$event_id($final_poll_intent) < $event_id($final_poll)' "$acceptance"
           grep -Fq '$event_id($final_poll) < $event_id($archive_event)' "$acceptance"
