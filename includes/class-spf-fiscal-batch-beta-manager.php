@@ -83,91 +83,112 @@ final class SPF_Fiscal_Batch_Beta_Manager {
     }
 
     public static function submit($batch_id) {
-        if (get_transient(self::LOCK)) { return new WP_Error('spf_beta_batch_busy', __('Ya hay una operación beta de lote en curso en esta instalación.', 'sistema-para-farmacias')); }
-        if (get_transient(self::SUBMIT_COOLDOWN)) { return new WP_Error('spf_beta_batch_cooldown', __('Espera unos segundos antes de enviar otro lote beta.', 'sistema-para-farmacias')); }
-        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch) { return new WP_Error('spf_beta_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
-        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
-            return new WP_Error('spf_beta_batch_already_ticketed', __('Este lote ya tiene ticket beta. Consulta su estado en lugar de volver a enviarlo.', 'sistema-para-farmacias'));
+        if (get_transient(self::SUBMIT_COOLDOWN)) {
+            return new WP_Error('spf_beta_batch_cooldown', __('Espera unos segundos antes de enviar otro lote beta.', 'sistema-para-farmacias'));
         }
-        $transport = self::transport((string)$batch['batch_type']);
-        if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('El país activo no define un transporte beta asíncrono para este lote.', 'sistema-para-farmacias')); }
-        if (!$transport->batch_enabled()) { return new WP_Error('spf_beta_batch_disabled', __('El transporte beta asíncrono del lote no está habilitado explícitamente.', 'sistema-para-farmacias')); }
-
-        $revalidation = SPF_Fiscal_Batch_Lifecycle::validate_batch($batch_id);
-        if (is_wp_error($revalidation)) { return $revalidation; }
-        if (sanitize_key((string)($revalidation['validation_status'] ?? '')) !== 'valid_local') {
-            return new WP_Error('spf_beta_batch_revalidation_required', __('El XML firmado exacto debe volver a superar XSD y XSL inmediatamente antes del envío beta.', 'sistema-para-farmacias'));
+        if (!self::acquire_lock()) {
+            return new WP_Error('spf_beta_batch_busy', __('Ya hay una operación beta de lote en curso en esta instalación.', 'sistema-para-farmacias'));
         }
-        $package = self::build_submit_package($batch_id);
-        if (is_wp_error($package)) { return $package; }
-        $inspection = $transport->inspect_batch($package);
-        if (is_wp_error($inspection)) { return $inspection; }
-        if (empty($inspection['ok'])) { return new WP_Error('spf_beta_batch_inspection', implode(' ', (array)($inspection['errors'] ?? []))); }
-
-        set_transient(self::LOCK, 1, MINUTE_IN_SECONDS);
-        set_transient(self::SUBMIT_COOLDOWN, 1, 15);
         try {
+            $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+            if (!$batch) { return new WP_Error('spf_beta_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+            if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
+                return new WP_Error('spf_beta_batch_already_ticketed', __('Este lote ya tiene ticket beta. Consulta su estado en lugar de volver a enviarlo.', 'sistema-para-farmacias'));
+            }
+            $transport = self::transport((string)$batch['batch_type']);
+            if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('El país activo no define un transporte beta asíncrono para este lote.', 'sistema-para-farmacias')); }
+            if (!$transport->batch_enabled()) { return new WP_Error('spf_beta_batch_disabled', __('El transporte beta asíncrono del lote no está habilitado explícitamente.', 'sistema-para-farmacias')); }
+
+            $revalidation = SPF_Fiscal_Batch_Lifecycle::validate_batch($batch_id);
+            if (is_wp_error($revalidation)) { return $revalidation; }
+            if (sanitize_key((string)($revalidation['validation_status'] ?? '')) !== 'valid_local') {
+                return new WP_Error('spf_beta_batch_revalidation_required', __('El XML firmado exacto debe volver a superar XSD y XSL inmediatamente antes del envío beta.', 'sistema-para-farmacias'));
+            }
+            $package = self::build_submit_package($batch_id);
+            if (is_wp_error($package)) { return $package; }
+            $inspection = $transport->inspect_batch($package);
+            if (is_wp_error($inspection)) { return $inspection; }
+            if (empty($inspection['ok'])) { return new WP_Error('spf_beta_batch_inspection', implode(' ', (array)($inspection['errors'] ?? []))); }
+
+            set_transient(self::SUBMIT_COOLDOWN, 1, 15);
             $result = $transport->submit_batch($package);
-        } finally {
-            delete_transient(self::LOCK);
-        }
-        if (is_wp_error($result)) {
-            self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message()], false);
+            if (is_wp_error($result)) {
+                self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message()], false);
+                return $result;
+            }
+            $status = self::normalize_status($result['beta_status'] ?? '');
+            $ticket = sanitize_text_field((string)($result['ticket'] ?? ''));
+            if ($ticket === '') {
+                $error = new WP_Error('spf_beta_batch_ticket_empty', __('El transporte beta no devolvió un ticket persistible.', 'sistema-para-farmacias'));
+                self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$error->get_error_message()], false);
+                return $error;
+            }
+            if (!self::store_result($batch_id, $status, $result, true)) {
+                return new WP_Error('spf_beta_batch_ticket_store', sprintf(__('Se recibió el ticket beta %s pero no pudo persistirse. No reenvíes el lote hasta recuperar esta evidencia.', 'sistema-para-farmacias'), $ticket));
+            }
             return $result;
+        } finally {
+            self::release_lock();
         }
-        $status = sanitize_key((string)($result['beta_status'] ?? 'beta_batch_transport_error'));
-        if (!array_key_exists($status, self::statuses())) { $status = 'beta_batch_transport_error'; }
-        $ticket = sanitize_text_field((string)($result['ticket'] ?? ''));
-        if ($ticket === '') {
-            $error = new WP_Error('spf_beta_batch_ticket_empty', __('El transporte beta no devolvió un ticket persistible.', 'sistema-para-farmacias'));
-            self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$error->get_error_message()], false);
-            return $error;
-        }
-        if (!self::store_result($batch_id, $status, $result, true)) {
-            return new WP_Error('spf_beta_batch_ticket_store', sprintf(__('Se recibió el ticket beta %s pero no pudo persistirse. No reenvíes el lote hasta recuperar esta evidencia.', 'sistema-para-farmacias'), $ticket));
-        }
-        return $result;
     }
 
     public static function poll($batch_id) {
-        if (get_transient(self::LOCK)) { return new WP_Error('spf_beta_batch_busy', __('Ya hay una operación beta de lote en curso en esta instalación.', 'sistema-para-farmacias')); }
-        if (get_transient(self::POLL_COOLDOWN)) { return new WP_Error('spf_beta_batch_poll_cooldown', __('Espera unos segundos antes de volver a consultar el ticket beta.', 'sistema-para-farmacias')); }
-        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch) { return new WP_Error('spf_beta_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
-        $ticket = trim((string)($batch['remote_ticket'] ?? ''));
-        if ($ticket === '') { return new WP_Error('spf_beta_batch_ticket_missing', __('El lote todavía no tiene ticket beta.', 'sistema-para-farmacias')); }
-        $transport = self::transport((string)$batch['batch_type']);
-        if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('El país activo no define un transporte beta asíncrono para este lote.', 'sistema-para-farmacias')); }
-        if (!$transport->batch_enabled()) { return new WP_Error('spf_beta_batch_disabled', __('El transporte beta asíncrono del lote no está habilitado explícitamente.', 'sistema-para-farmacias')); }
-        $integrity = SPF_Fiscal_Batch_Integrity::reconstruct($batch_id);
-        if (is_wp_error($integrity)) { return $integrity; }
-        $issuer = (array)($integrity['context']['issuer'] ?? []);
-        $package = [
-            'country'=>sanitize_key((string)($batch['country_code'] ?? '')),
-            'batch_id'=>(int)$batch_id,
-            'batch_type'=>sanitize_key((string)($batch['batch_type'] ?? '')),
-            'identifier'=>sanitize_text_field((string)($batch['identifier'] ?? '')),
-            'issuer_tax_id'=>sanitize_text_field((string)($issuer['tax_id'] ?? '')),
-            'ticket'=>$ticket,
-        ];
-        set_transient(self::LOCK, 1, MINUTE_IN_SECONDS);
-        set_transient(self::POLL_COOLDOWN, 1, 5);
+        if (get_transient(self::POLL_COOLDOWN)) {
+            return new WP_Error('spf_beta_batch_poll_cooldown', __('Espera unos segundos antes de volver a consultar el ticket beta.', 'sistema-para-farmacias'));
+        }
+        if (!self::acquire_lock()) {
+            return new WP_Error('spf_beta_batch_busy', __('Ya hay una operación beta de lote en curso en esta instalación.', 'sistema-para-farmacias'));
+        }
         try {
+            $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+            if (!$batch) { return new WP_Error('spf_beta_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+            $ticket = trim((string)($batch['remote_ticket'] ?? ''));
+            if ($ticket === '') { return new WP_Error('spf_beta_batch_ticket_missing', __('El lote todavía no tiene ticket beta.', 'sistema-para-farmacias')); }
+            $transport = self::transport((string)$batch['batch_type']);
+            if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('El país activo no define un transporte beta asíncrono para este lote.', 'sistema-para-farmacias')); }
+            if (!$transport->batch_enabled()) { return new WP_Error('spf_beta_batch_disabled', __('El transporte beta asíncrono del lote no está habilitado explícitamente.', 'sistema-para-farmacias')); }
+            $integrity = SPF_Fiscal_Batch_Integrity::reconstruct($batch_id);
+            if (is_wp_error($integrity)) { return $integrity; }
+            $issuer = (array)($integrity['context']['issuer'] ?? []);
+            $package = [
+                'country'=>sanitize_key((string)($batch['country_code'] ?? '')),
+                'batch_id'=>(int)$batch_id,
+                'batch_type'=>sanitize_key((string)($batch['batch_type'] ?? '')),
+                'identifier'=>sanitize_text_field((string)($batch['identifier'] ?? '')),
+                'issuer_tax_id'=>sanitize_text_field((string)($issuer['tax_id'] ?? '')),
+                'ticket'=>$ticket,
+            ];
+            set_transient(self::POLL_COOLDOWN, 1, 5);
             $result = $transport->poll_batch($package);
-        } finally {
-            delete_transient(self::LOCK);
-        }
-        if (is_wp_error($result)) {
-            self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message(),'ticket'=>$ticket], false);
+            if (is_wp_error($result)) {
+                self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message(),'ticket'=>$ticket], false);
+                return $result;
+            }
+            $status = self::normalize_status($result['beta_status'] ?? '');
+            if (!self::store_result($batch_id, $status, $result, false)) {
+                return new WP_Error('spf_beta_batch_status_store', __('La consulta beta respondió, pero no pudo persistirse su evidencia.', 'sistema-para-farmacias'));
+            }
             return $result;
+        } finally {
+            self::release_lock();
         }
-        $status = sanitize_key((string)($result['beta_status'] ?? 'beta_batch_transport_error'));
-        if (!array_key_exists($status, self::statuses())) { $status = 'beta_batch_transport_error'; }
-        if (!self::store_result($batch_id, $status, $result, false)) {
-            return new WP_Error('spf_beta_batch_status_store', __('La consulta beta respondió, pero no pudo persistirse su evidencia.', 'sistema-para-farmacias'));
-        }
-        return $result;
+    }
+
+    private static function acquire_lock() {
+        global $wpdb;
+        $name = 'spf_beta_batch_' . md5($wpdb->prefix . '|' . self::LOCK);
+        return (int)$wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s,0)', $name)) === 1;
+    }
+
+    private static function release_lock() {
+        global $wpdb;
+        $name = 'spf_beta_batch_' . md5($wpdb->prefix . '|' . self::LOCK);
+        $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $name));
+    }
+
+    private static function normalize_status($status) {
+        $status = sanitize_key((string)$status);
+        return array_key_exists($status, self::statuses()) ? $status : 'beta_batch_transport_error';
     }
 
     private static function store_result($batch_id, $status, array $result, $store_ticket) {
