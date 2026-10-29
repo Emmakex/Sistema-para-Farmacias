@@ -29,6 +29,7 @@ final class SPF_Fiscal_Transport_Manager {
             'beta_accepted' => __('Aceptado en beta', 'sistema-para-farmacias'),
             'beta_accepted_with_observation' => __('Beta con observaciones', 'sistema-para-farmacias'),
             'beta_rejected' => __('Rechazado en beta', 'sistema-para-farmacias'),
+            'beta_evidence_error' => __('Error de conservación de evidencia', 'sistema-para-farmacias'),
             'beta_transport_error' => __('Error beta', 'sistema-para-farmacias'),
         ];
     }
@@ -202,24 +203,70 @@ final class SPF_Fiscal_Transport_Manager {
         $status = sanitize_key((string)($result['beta_status'] ?? 'beta_transport_error'));
         if (!array_key_exists($status, self::beta_statuses())) { $status = 'beta_transport_error'; }
         $result['validation_xml_sha256'] = $package['validation_xml_sha256'];
+
+        if (self::is_final_beta_status($status)) {
+            $archive = SPF_Fiscal_Evidence_Manager::archive_document_cdr($document_id, $result);
+            if (is_wp_error($archive)) {
+                $failed = $result;
+                $failed['remote_outcome_status'] = $status;
+                $failed['evidence_error'] = $archive->get_error_message();
+                self::store_beta_result($document_id, 'beta_evidence_error', $failed);
+                return new WP_Error('spf_beta_invoice_evidence_archive', sprintf(__('La autoridad beta respondió, pero la CDR de la factura no pudo conservarse de forma verificable: %s', 'sistema-para-farmacias'), $archive->get_error_message()));
+            }
+            $result['evidence_archive'] = $archive;
+        }
+
         self::store_beta_result($document_id, $status, $result);
         return $result;
+    }
+
+    private static function is_final_beta_status($status) {
+        return in_array(sanitize_key((string)$status), [
+            'beta_accepted',
+            'beta_accepted_with_observation',
+            'beta_rejected',
+        ], true);
+    }
+
+    private static function sanitize_archive(array $archive) {
+        $clean = [
+            'store'=>sanitize_key((string)($archive['store'] ?? '')),
+            'status'=>sanitize_key((string)($archive['status'] ?? '')),
+            'archived_at'=>sanitize_text_field((string)($archive['archived_at'] ?? '')),
+        ];
+        foreach (['cdr_zip','cdr_xml','manifest'] as $key) {
+            $record = is_array($archive[$key] ?? null) ? $archive[$key] : [];
+            $clean[$key] = [
+                'locator'=>sanitize_text_field((string)($record['locator'] ?? '')),
+                'sha256'=>sanitize_text_field((string)($record['sha256'] ?? '')),
+                'bytes'=>(int)($record['bytes'] ?? 0),
+            ];
+        }
+        return $clean;
     }
 
     private static function store_beta_result($document_id, $status, array $result) {
         global $wpdb;
         $table = SPF_Database::table('invoices');
         $existing = $wpdb->get_var($wpdb->prepare("SELECT response_body FROM $table WHERE id=%d", absint($document_id)));
-        $metadata = json_decode((string)$existing, true); $metadata = is_array($metadata) ? $metadata : [];
+        $metadata = json_decode((string)$existing, true);
+        $metadata = is_array($metadata) ? $metadata : [];
+        $previous = is_array($metadata['fiscal_beta'] ?? null) ? $metadata['fiscal_beta'] : [];
+        $archive = is_array($result['evidence_archive'] ?? null)
+            ? self::sanitize_archive($result['evidence_archive'])
+            : (is_array($previous['evidence_archive'] ?? null) ? $previous['evidence_archive'] : []);
         $metadata['fiscal_beta'] = [
             'status'=>sanitize_key($status),
-            'remote_code'=>sanitize_text_field((string)($result['remote_code'] ?? '')),
-            'remote_message'=>sanitize_text_field((string)($result['remote_message'] ?? ($result['error'] ?? ''))),
-            'notes'=>array_map('sanitize_text_field',(array)($result['notes'] ?? [])),
-            'request_zip_sha256'=>sanitize_text_field((string)($result['request_zip_sha256'] ?? '')),
-            'cdr_zip_sha256'=>sanitize_text_field((string)($result['cdr_zip_sha256'] ?? '')),
-            'cdr_xml_sha256'=>sanitize_text_field((string)($result['cdr_xml_sha256'] ?? '')),
-            'validation_xml_sha256'=>sanitize_text_field((string)($result['validation_xml_sha256'] ?? '')),
+            'remote_outcome_status'=>sanitize_key((string)($result['remote_outcome_status'] ?? ($previous['remote_outcome_status'] ?? ''))),
+            'remote_code'=>sanitize_text_field((string)($result['remote_code'] ?? ($previous['remote_code'] ?? ''))),
+            'remote_message'=>sanitize_text_field((string)($result['remote_message'] ?? ($result['error'] ?? ($previous['remote_message'] ?? '')))),
+            'notes'=>array_map('sanitize_text_field',(array)($result['notes'] ?? ($previous['notes'] ?? []))),
+            'request_zip_sha256'=>sanitize_text_field((string)($result['request_zip_sha256'] ?? ($previous['request_zip_sha256'] ?? ''))),
+            'cdr_zip_sha256'=>sanitize_text_field((string)($result['cdr_zip_sha256'] ?? ($previous['cdr_zip_sha256'] ?? ''))),
+            'cdr_xml_sha256'=>sanitize_text_field((string)($result['cdr_xml_sha256'] ?? ($previous['cdr_xml_sha256'] ?? ''))),
+            'validation_xml_sha256'=>sanitize_text_field((string)($result['validation_xml_sha256'] ?? ($previous['validation_xml_sha256'] ?? ''))),
+            'evidence_error'=>sanitize_text_field((string)($result['evidence_error'] ?? '')),
+            'evidence_archive'=>$archive,
             'environment'=>'beta',
             'production'=>false,
             'tested_at'=>current_time('mysql'),
