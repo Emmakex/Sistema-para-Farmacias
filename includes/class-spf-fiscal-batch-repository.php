@@ -41,11 +41,7 @@ final class SPF_Fiscal_Batch_Repository {
                 throw new RuntimeException(__('No hay comprobantes elegibles para crear el lote fiscal.', 'sistema-para-farmacias'));
             }
 
-            $max_sequence = (int)$wpdb->get_var($wpdb->prepare(
-                "SELECT COALESCE(MAX(sequence),0) FROM $batches WHERE country_code=%s AND batch_type=%s AND reference_date=%s",
-                $country, $batch_type, $reference_date
-            ));
-            $sequence = $max_sequence + 1;
+            $sequence = self::next_sequence($country, $batch_type, $reference_date);
             $context['sequence'] = $sequence;
             $built = $builder->build($context);
             if (is_wp_error($built)) { throw new RuntimeException($built->get_error_message()); }
@@ -117,6 +113,18 @@ final class SPF_Fiscal_Batch_Repository {
         } finally {
             $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock_name));
         }
+    }
+
+    public static function next_sequence($country, $batch_type, $reference_date) {
+        global $wpdb;
+        $table = SPF_Database::table('fiscal_batches');
+        $date = self::normalize_date($reference_date);
+        if ($date === '') { return 1; }
+        $max = (int)$wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(MAX(sequence),0) FROM $table WHERE country_code=%s AND batch_type=%s AND reference_date=%s",
+            sanitize_key((string)$country), sanitize_key((string)$batch_type), $date
+        ));
+        return $max + 1;
     }
 
     public static function get($batch_id) {
