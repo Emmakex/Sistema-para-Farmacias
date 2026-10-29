@@ -18,11 +18,23 @@ jobs:
           set -euo pipefail
           violations="$(grep -RInE 'S/|SUNAT|Yape|Plin|\bIGV\b|\bRUC\b|\bDNI\b' \
             --include='*.php' \
-            --exclude='class-spf-country-peru.php' \
+            --exclude-dir='countries' \
             --exclude-dir='.git' \
             . || true)"
           if [ -n "$violations" ]; then
             echo "Country-specific literals found outside country packs:"
+            echo "$violations"
+            exit 1
+          fi
+      - name: Fiscal preflight must not transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          violations="$(grep -nE 'wp_remote_|curl_|SoapClient|sendBill|sendSummary' \
+            includes/class-spf-fiscal-manager.php \
+            includes/countries/peru/class-spf-fiscal-adapter-peru.php || true)"
+          if [ -n "$violations" ]; then
+            echo "Transport code found inside preflight-only fiscal cut:"
             echo "$violations"
             exit 1
           fi
