@@ -97,7 +97,7 @@ final class SPF_Fiscal_Validation_Manager {
         $existing = $wpdb->get_var($wpdb->prepare("SELECT response_body FROM $table WHERE id=%d", $document_id));
         $metadata = json_decode((string)$existing, true);
         $metadata = is_array($metadata) ? $metadata : [];
-        unset($metadata['sunat_beta']);
+        unset($metadata['sunat_beta'], $metadata['fiscal_beta']);
         $validated_hash = sanitize_text_field((string)($result['signed_xml_sha256'] ?? ''));
         $metadata['local_validation'] = [
             'status' => sanitize_key($status),
