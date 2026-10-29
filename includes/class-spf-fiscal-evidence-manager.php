@@ -80,7 +80,6 @@ final class SPF_Fiscal_Evidence_Manager {
             'notes'=>array_map('sanitize_text_field',(array)($result['notes'] ?? [])),
             'cdr_zip'=>['locator'=>$zip_record['locator'],'sha256'=>$zip_hash,'bytes'=>(int)$zip_record['bytes']],
             'cdr_xml'=>['locator'=>$xml_record['locator'],'sha256'=>$xml_hash,'bytes'=>(int)$xml_record['bytes']],
-            'archived_at'=>current_time('mysql'),
         ];
         $manifest_bytes = wp_json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         if (!is_string($manifest_bytes) || $manifest_bytes === '') {
@@ -90,6 +89,7 @@ final class SPF_Fiscal_Evidence_Manager {
         if (is_wp_error($manifest_record)) { return $manifest_record; }
         $manifest_verified = $store->verify($manifest_record['locator'], $manifest_record['sha256']);
         if (is_wp_error($manifest_verified)) { return $manifest_verified; }
+        $archived_at = current_time('mysql');
 
         return [
             'store'=>sanitize_key((string)$store->code()),
@@ -97,7 +97,7 @@ final class SPF_Fiscal_Evidence_Manager {
             'cdr_zip'=>$zip_record,
             'cdr_xml'=>$xml_record,
             'manifest'=>$manifest_record,
-            'archived_at'=>$manifest['archived_at'],
+            'archived_at'=>$archived_at,
         ];
     }
 }
