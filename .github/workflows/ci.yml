@@ -16,6 +16,8 @@ jobs:
         run: php tests/fiscal-signature-smoke.php
       - name: Fiscal XSD XSL smoke
         run: php tests/fiscal-validation-smoke.php
+      - name: Peru beta fail-closed smoke
+        run: php tests/fiscal-beta-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -23,6 +25,7 @@ jobs:
           violations="$(grep -RInE 'S/|SUNAT|Yape|Plin|\bIGV\b|\bRUC\b|\bDNI\b' \
             --include='*.php' \
             --exclude-dir='countries' \
+            --exclude='fiscal-beta-smoke.php' \
             --exclude-dir='.git' \
             . || true)"
           if [ -n "$violations" ]; then
@@ -30,23 +33,38 @@ jobs:
             echo "$violations"
             exit 1
           fi
-      - name: Fiscal layers remain network-free
+      - name: Local fiscal layers remain network-free
         shell: bash
         run: |
           set -euo pipefail
-          violations="$(grep -RInE 'wp_remote_|curl_|SoapClient|sendBill|sendSummary|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' \
+          violations="$(grep -RInE 'wp_remote_|curl_|SoapClient|__soapCall|sendBill|sendSummary|getStatus|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' \
             --include='*.php' \
-            includes/class-spf-fiscal-manager.php \
-            includes/class-spf-fiscal-signing-manager.php \
-            includes/class-spf-fiscal-validation-manager.php \
-            includes/class-spf-fiscal-transport-manager.php \
-            includes/fiscal \
-            includes/countries/peru || true)"
+            --exclude='class-spf-fiscal-transport-peru-beta.php' \
+            --exclude='fiscal-beta-smoke.php' \
+            includes tests || true)"
           if [ -n "$violations" ]; then
-            echo "Real network transport found inside local-only fiscal cut:"
+            echo "Network transport leaked outside the isolated beta transport:"
             echo "$violations"
             exit 1
           fi
+      - name: Peru beta transport remains test-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          beta='includes/countries/peru/class-spf-fiscal-transport-peru-beta.php'
+          grep -Fq 'https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService?wsdl' "$beta"
+          grep -Fq "__soapCall('sendBill'" "$beta"
+          grep -Fq "const TEST_USER = 'MODDATOS'" "$beta"
+          grep -Fq "const TEST_PASSWORD = 'MODDATOS'" "$beta"
+          if grep -En 'e-factura\.sunat\.gob\.pe|sendSummary|getStatus' "$beta"; then
+            echo "Production or asynchronous operations are forbidden in the invoice-only beta cut"
+            exit 1
+          fi
+          if grep -RIn 'e-factura\.sunat\.gob\.pe' --include='*.php' .; then
+            echo "Production fiscal endpoint must remain absent from PHP"
+            exit 1
+          fi
+          grep -Fq "'default_transport'=>'dry_run'" includes/countries/class-spf-country-peru.php
       - name: Fiscal credentials stay outside repository and database
         shell: bash
         run: |
