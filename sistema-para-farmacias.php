@@ -3,14 +3,14 @@
  * Plugin Name: Sistema para Farmacias
  * Plugin URI: https://kairoseth.com/
  * Description: Sistema WordPress para farmacias con inventario por lotes, punto de venta, clientes, comprobantes, dashboard y arquitectura multi-país.
- * Version: 0.10.0
+ * Version: 0.11.0
  * Author: Kairoseth
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: sistema-para-farmacias
  */
 if (!defined('ABSPATH')) { exit; }
-define('SPF_VERSION','0.10.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
+define('SPF_VERSION','0.11.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
 require_once SPF_PLUGIN_DIR.'includes/class-spf-country-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/countries/class-spf-country-peru.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-config.php';
@@ -39,6 +39,7 @@ require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-validation-manager.php';
 require_once SPF_PLUGIN_DIR.'includes/fiscal/interface-spf-fiscal-transport.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-transport-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/fiscal/class-spf-fiscal-transport-dry-run.php';
+require_once SPF_PLUGIN_DIR.'includes/countries/peru/class-spf-fiscal-transport-peru-beta.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-transport-manager.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-documents.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-sales.php';
@@ -54,6 +55,7 @@ function spf_bootstrap(){
     SPF_Fiscal_Credentials_Registry::register(new SPF_Fiscal_Credentials_Environment());
     SPF_Fiscal_Validator_Registry::register(new SPF_Fiscal_XSD_XSL_Validator());
     SPF_Fiscal_Transport_Registry::register(new SPF_Fiscal_Transport_Dry_Run());
+    SPF_Fiscal_Transport_Registry::register(new SPF_Fiscal_Transport_Peru_Beta());
     SPF_Activator::maybe_upgrade();
     SPF_Roles::ensure_roles();
     $admin=new SPF_Admin();$admin->hooks();
