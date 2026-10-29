@@ -26,6 +26,8 @@ jobs:
         run: php tests/fiscal-beta-smoke.php
       - name: Peru daily summary beta fail-closed smoke
         run: php tests/fiscal-beta-summary-smoke.php
+      - name: Fiscal evidence archive smoke
+        run: php tests/fiscal-evidence-archive-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -38,6 +40,7 @@ jobs:
             --exclude='fiscal-daily-summary-smoke.php' \
             --exclude='fiscal-batch-persistence-smoke.php' \
             --exclude='fiscal-batch-sign-validate-smoke.php' \
+            --exclude='fiscal-evidence-archive-smoke.php' \
             --exclude-dir='.git' \
             . || true)"
           if [ -n "$violations" ]; then
@@ -176,6 +179,35 @@ jobs:
           fi
           if grep -En 'SUNAT|MODDATOS|sendSummary|getStatus|e-beta\.sunat\.gob\.pe' "$manager"; then
             echo "Authority-specific beta literals leaked into generic batch manager"
+            exit 1
+          fi
+      - name: Fiscal evidence archive invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider='includes/fiscal/class-spf-fiscal-evidence-filesystem.php'
+          manager='includes/class-spf-fiscal-evidence-manager.php'
+          beta_manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          country='includes/countries/class-spf-country-peru.php'
+          grep -Fq 'SPF_FISCAL_EVIDENCE_DIR' "$provider"
+          grep -Fq 'spf_evidence_root_web' "$provider"
+          grep -Fq 'LOCK_EX' "$provider"
+          grep -Fq 'hash_file' "$provider"
+          grep -Fq 'rename($tmp, $target)' "$provider"
+          grep -Fq "'evidence_store'=>'external_filesystem'" "$country"
+          grep -Fq 'SPF_Fiscal_Evidence_Manager::archive_batch_cdr' "$beta_manager"
+          grep -Fq "'beta_batch_evidence_error'" "$beta_manager"
+          grep -Fq "'evidence_archive'=>" "$beta_manager"
+          if grep -Fq 'cdr_zip_bytes' "$beta_manager" || grep -Fq 'cdr_xml_bytes' "$beta_manager"; then
+            echo "Raw CDR bytes must never enter the generic beta manager/database metadata"
+            exit 1
+          fi
+          if grep -RInE 'SoapClient|__soapCall|wp_remote_|curl_' --include='*evidence*.php' includes; then
+            echo "Evidence archive layer must remain network-free"
+            exit 1
+          fi
+          if grep -RInF 'base64_encode' --include='*evidence*.php' includes; then
+            echo "Raw fiscal evidence must not be encoded for database persistence"
             exit 1
           fi
       - name: Fiscal credentials stay outside repository and database
