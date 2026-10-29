@@ -260,7 +260,9 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
 
     private function extract_status_response($response) {
         $node = $response;
-        if (is_object($node) && isset($node->return)) { $node = $node->return; }
+        if (is_object($node) && isset($node->status)) { $node = $node->status; }
+        elseif (is_array($node) && isset($node['status'])) { $node = $node['status']; }
+        elseif (is_object($node) && isset($node->return)) { $node = $node->return; }
         elseif (is_array($node) && isset($node['return'])) { $node = $node['return']; }
         if (is_object($node)) {
             $code = isset($node->statusCode) ? trim((string)$node->statusCode) : '';
