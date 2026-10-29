@@ -1,0 +1,67 @@
+name: Fiscal Beta Readiness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax for readiness cut
+        run: |
+          php -l includes/class-spf-fiscal-batch-beta-diagnostics.php
+          php -l tests/fiscal-beta-readiness-smoke.php
+          php -l sistema-para-farmacias.php
+      - name: Network-free readiness smoke
+        run: php tests/fiscal-beta-readiness-smoke.php
+      - name: Diagnostics remain side-effect and network free
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='includes/class-spf-fiscal-batch-beta-diagnostics.php'
+          grep -Fq "'network_performed'=>false" "$file"
+          grep -Fq 'current_local_revalidation' "$file"
+          grep -Fq 'transport_inspection' "$file"
+          grep -Fq 'beta_opt_in' "$file"
+          grep -Fq 'SPF_Fiscal_Batch_Integrity::reconstruct' "$file"
+          grep -Fq 'SPF_Fiscal_Batch_Lifecycle::build_signed_payload' "$file"
+          grep -Fq 'SPF_Fiscal_Validator_Registry::get' "$file"
+          if grep -En '__soapCall|wp_remote_|curl_|submit_batch\(|poll_batch\(' "$file"; then
+            echo 'Readiness diagnostics must never perform remote transport'
+            exit 1
+          fi
+      - name: Evidence export stays sanitized
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='includes/class-spf-fiscal-batch-beta-diagnostics.php'
+          grep -Fq "'schema'=>'spf-fiscal-beta-evidence-v1'" "$file"
+          grep -Fq "'export_sha256'" "$file"
+          grep -Fq 'Content-Disposition: attachment' "$file"
+          grep -Fq 'spf_fiscal_batch_beta_evidence_export' "$file"
+          if grep -En 'response_body|snapshot_body|metadata_body|private_key|private_key_pem|certificate_pem|P12_PASSWORD' "$file"; then
+            echo 'Evidence export must not expose payload bodies or credentials'
+            exit 1
+          fi
+      - name: Fiscal admin panel exposes readiness controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='includes/class-spf-fiscal-batch-beta-diagnostics.php'
+          grep -Fq "add_action('admin_notices'" "$file"
+          grep -Fq 'Diagnóstico beta' "$file"
+          grep -Fq 'Exportar evidencia JSON' "$file"
+          grep -Fq 'network_performed=' "$file"
+      - name: Production remains absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInF 'e-factura.sunat.gob.pe' --include='*.php' .; then
+            echo 'Production fiscal endpoint remains forbidden'
+            exit 1
+          fi
+          grep -Fq "Version: 0.17.0" sistema-para-farmacias.php
+          grep -Fq "define('SPF_VERSION','0.17.0')" sistema-para-farmacias.php
