@@ -16,6 +16,8 @@ jobs:
         run: php tests/fiscal-signature-smoke.php
       - name: Fiscal XSD XSL smoke
         run: php tests/fiscal-validation-smoke.php
+      - name: Peru daily SummaryDocuments smoke
+        run: php tests/fiscal-daily-summary-smoke.php
       - name: Peru beta fail-closed smoke
         run: php tests/fiscal-beta-smoke.php
       - name: Country-neutral core guard
@@ -26,6 +28,7 @@ jobs:
             --include='*.php' \
             --exclude-dir='countries' \
             --exclude='fiscal-beta-smoke.php' \
+            --exclude='fiscal-daily-summary-smoke.php' \
             --exclude-dir='.git' \
             . || true)"
           if [ -n "$violations" ]; then
@@ -57,7 +60,7 @@ jobs:
           grep -Fq "const TEST_USER = 'MODDATOS'" "$beta"
           grep -Fq "const TEST_PASSWORD = 'MODDATOS'" "$beta"
           if grep -En "__soapCall\(['\"](?:sendSummary|getStatus)['\"]" "$beta"; then
-            echo "Asynchronous SOAP operations are forbidden in the invoice-only beta cut"
+            echo "Asynchronous SOAP operations are forbidden until the daily summary transport cut"
             exit 1
           fi
           if grep -Fq 'e-factura.sunat.gob.pe' "$beta"; then
@@ -69,6 +72,19 @@ jobs:
             exit 1
           fi
           grep -Fq "'default_transport'=>'dry_run'" includes/countries/class-spf-country-peru.php
+      - name: Daily summary remains local-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder='includes/countries/peru/class-spf-fiscal-batch-builder-peru-summary.php'
+          grep -Fq "'2.0'" "$builder"
+          grep -Fq "'1.1'" "$builder"
+          grep -Fq "'03'" "$builder"
+          grep -Fq "'ConditionCode'" "$builder"
+          if grep -RInE "__soapCall|sendSummary|getStatus" --include='*batch*.php' includes; then
+            echo "Daily summary builder must remain network-free"
+            exit 1
+          fi
       - name: Fiscal credentials stay outside repository and database
         shell: bash
         run: |
