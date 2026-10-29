@@ -92,6 +92,7 @@ final class SPF_Fiscal_Batch_Manager {
         if (is_wp_error($context)) { return $context; }
         if (!$builder->supports($batch_type)) { return new WP_Error('spf_batch_builder_unsupported', __('El builder fiscal no soporta este tipo de lote.', 'sistema-para-farmacias')); }
         if (!$context['lines']) { return new WP_Error('spf_batch_empty', __('No hay comprobantes nuevos pendientes de agrupar para la fecha seleccionada.', 'sistema-para-farmacias')); }
+        $context['sequence'] = SPF_Fiscal_Batch_Repository::next_sequence($context['country_code'], $batch_type, $reference_date);
         $result = $builder->build($context);
         if (is_wp_error($result)) { return $result; }
         $result['builder'] = $builder->code();
