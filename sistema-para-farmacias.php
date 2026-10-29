@@ -3,14 +3,14 @@
  * Plugin Name: Sistema para Farmacias
  * Plugin URI: https://kairoseth.com/
  * Description: Sistema WordPress para farmacias con inventario por lotes, punto de venta, clientes, comprobantes, dashboard y arquitectura multi-país.
- * Version: 0.8.0
+ * Version: 0.9.0
  * Author: Kairoseth
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: sistema-para-farmacias
  */
 if (!defined('ABSPATH')) { exit; }
-define('SPF_VERSION','0.8.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
+define('SPF_VERSION','0.9.0'); define('SPF_PLUGIN_FILE',__FILE__); define('SPF_PLUGIN_DIR',plugin_dir_path(__FILE__)); define('SPF_PLUGIN_URL',plugin_dir_url(__FILE__));
 require_once SPF_PLUGIN_DIR.'includes/class-spf-country-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/countries/class-spf-country-peru.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-config.php';
@@ -25,6 +25,13 @@ require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-adapter-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-settings.php';
 require_once SPF_PLUGIN_DIR.'includes/countries/peru/class-spf-fiscal-adapter-peru.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-manager.php';
+require_once SPF_PLUGIN_DIR.'includes/fiscal/interface-spf-fiscal-signer.php';
+require_once SPF_PLUGIN_DIR.'includes/fiscal/interface-spf-fiscal-credentials-provider.php';
+require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-signer-registry.php';
+require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-credentials-registry.php';
+require_once SPF_PLUGIN_DIR.'includes/fiscal/class-spf-fiscal-credentials-environment.php';
+require_once SPF_PLUGIN_DIR.'includes/fiscal/class-spf-fiscal-xmldsig-signer.php';
+require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-signing-manager.php';
 require_once SPF_PLUGIN_DIR.'includes/fiscal/interface-spf-fiscal-transport.php';
 require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-transport-registry.php';
 require_once SPF_PLUGIN_DIR.'includes/fiscal/class-spf-fiscal-transport-dry-run.php';
@@ -39,6 +46,8 @@ register_activation_hook(__FILE__,['SPF_Activator','activate']);
 function spf_bootstrap(){
     SPF_Country_Peru::register();
     SPF_Fiscal_Adapter_Registry::register(new SPF_Fiscal_Adapter_Peru());
+    SPF_Fiscal_Signer_Registry::register(new SPF_Fiscal_XMLDSig_Signer());
+    SPF_Fiscal_Credentials_Registry::register(new SPF_Fiscal_Credentials_Environment());
     SPF_Fiscal_Transport_Registry::register(new SPF_Fiscal_Transport_Dry_Run());
     SPF_Activator::maybe_upgrade();
     SPF_Roles::ensure_roles();
@@ -48,6 +57,7 @@ function spf_bootstrap(){
     $customers=new SPF_Customers();$customers->hooks();
     $documents=new SPF_Documents();$documents->hooks();
     $fiscal=new SPF_Fiscal_Manager();$fiscal->hooks();
+    $signing=new SPF_Fiscal_Signing_Manager();$signing->hooks();
     $transport=new SPF_Fiscal_Transport_Manager();$transport->hooks();
     $sales=new SPF_Sales();$sales->hooks();
     $tools=new SPF_Data_Tools();$tools->hooks();
