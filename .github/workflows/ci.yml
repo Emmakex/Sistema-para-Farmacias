@@ -14,6 +14,8 @@ jobs:
         run: find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Fiscal XMLDSig smoke
         run: php tests/fiscal-signature-smoke.php
+      - name: Fiscal XSD XSL smoke
+        run: php tests/fiscal-validation-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -36,6 +38,7 @@ jobs:
             --include='*.php' \
             includes/class-spf-fiscal-manager.php \
             includes/class-spf-fiscal-signing-manager.php \
+            includes/class-spf-fiscal-validation-manager.php \
             includes/class-spf-fiscal-transport-manager.php \
             includes/fiscal \
             includes/countries/peru || true)"
@@ -58,5 +61,15 @@ jobs:
           if [ -n "$persistence" ]; then
             echo "Fiscal credential persistence detected:"
             echo "$persistence"
+            exit 1
+          fi
+      - name: Official validation packs stay external
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation_files="$(find . -type f \( -iname '*.xsd' -o -iname '*.xsl' -o -iname '*.xslt' \) -not -path './.git/*' -print)"
+          if [ -n "$validation_files" ]; then
+            echo "XSD/XSL validation resources must stay external to the plugin:"
+            echo "$validation_files"
             exit 1
           fi
