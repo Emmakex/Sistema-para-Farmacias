@@ -1,5 +1,11 @@
 <?php
 define('ABSPATH', __DIR__.'/../');
+if (!function_exists('sanitize_key')) {
+    function sanitize_key($value) { return preg_replace('/[^a-z0-9_\-]/', '', strtolower((string)$value)); }
+}
+if (!function_exists('sanitize_text_field')) {
+    function sanitize_text_field($value) { return trim(strip_tags((string)$value)); }
+}
 require_once __DIR__.'/../includes/class-spf-fiscal-beta-batch-acceptance.php';
 
 function fail_batch_acceptance($message) { fwrite(STDERR, $message."\n"); exit(1); }
@@ -116,7 +122,7 @@ assert_batch_acceptance(empty($result['certified']) && in_array('ticket_consiste
 
 $missing_final_intent = array_values(array_filter($events, static function($event) { return (int)$event['id'] !== 6; }));
 $result = SPF_Fiscal_Beta_Batch_Acceptance::assess($batch,$missing_final_intent,$evidence);
-assert_batch_acceptance(empty($result['certified']) && in_array('event_order',$result['failed'],true), 'final poll without its preceding intent must block certification');
+assert_batch_acceptance(empty($result['certified']) && in_array('event_order',$result['failed'],true), 'final poll without its own preceding intent must block certification');
 
 $bad_manifest = $events;
 $bad_archive = $archive;
