@@ -14,11 +14,7 @@ final class SPF_Config {
 
     public static function country() {
         $country = SPF_Country_Registry::get(self::country_code());
-        if ($country) {
-            return $country;
-        }
-
-        return SPF_Country_Registry::get('pe');
+        return $country ?: SPF_Country_Registry::get('pe');
     }
 
     public static function get($path, $default = null) {
@@ -49,6 +45,20 @@ final class SPF_Config {
 
     public static function tax_name() {
         return (string) self::get('tax.name', __('Impuesto', 'sistema-para-farmacias'));
+    }
+
+    public static function tax_classes() {
+        $classes = self::get('tax_classes', []);
+        return is_array($classes) ? $classes : [];
+    }
+
+    public static function default_tax_class() {
+        $default = sanitize_key((string) self::get('default_tax_class', ''));
+        $classes = self::tax_classes();
+        if ($default && array_key_exists($default, $classes)) {
+            return $default;
+        }
+        return $classes ? (string) array_key_first($classes) : 'standard';
     }
 
     public static function payment_methods() {
