@@ -7,47 +7,29 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
     public function hooks() {
         add_action('admin_post_spf_fiscal_batch_beta_diagnostics', [$this, 'handle_diagnostics']);
         add_action('admin_post_spf_fiscal_batch_beta_evidence_export', [$this, 'handle_export']);
+        add_action('admin_notices', [$this, 'render_admin_panel']);
     }
 
     public static function inspect($batch_id) {
         $batch_id = absint($batch_id);
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch) {
-            return new WP_Error('spf_beta_diagnostics_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias'));
-        }
-
+        if (!$batch) { return new WP_Error('spf_beta_diagnostics_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
         $checks = [];
         $add = static function($code, $ok, $message, $severity = 'required') use (&$checks) {
-            $checks[] = [
-                'code'=>sanitize_key((string)$code),
-                'ok'=>(bool)$ok,
-                'severity'=>sanitize_key((string)$severity),
-                'message'=>sanitize_text_field((string)$message),
-            ];
+            $checks[] = ['code'=>sanitize_key((string)$code),'ok'=>(bool)$ok,'severity'=>sanitize_key((string)$severity),'message'=>sanitize_text_field((string)$message)];
         };
-
         $transport = SPF_Fiscal_Batch_Beta_Manager::transport((string)($batch['batch_type'] ?? ''));
         $add('transport', (bool)$transport, $transport ? sprintf(__('Transporte beta disponible: %s.', 'sistema-para-farmacias'), $transport->code()) : __('No hay transporte beta asíncrono para este tipo de lote.', 'sistema-para-farmacias'));
-
-        $runtime = self::runtime_capabilities();
-        foreach ($runtime as $code => $available) {
+        foreach (self::runtime_capabilities() as $code => $available) {
             $add('runtime_' . $code, $available, $available ? sprintf(__('Runtime disponible: %s.', 'sistema-para-farmacias'), $code) : sprintf(__('Falta el runtime requerido: %s.', 'sistema-para-farmacias'), $code));
         }
-
         $integrity = SPF_Fiscal_Batch_Integrity::reconstruct($batch_id);
         $integrity_ok = !is_wp_error($integrity);
         $add('snapshot_integrity', $integrity_ok, $integrity_ok ? __('El snapshot y el XML base se reconstruyen con integridad.', 'sistema-para-farmacias') : (is_wp_error($integrity) ? $integrity->get_error_message() : __('Falló la integridad del lote.', 'sistema-para-farmacias')));
-
-        $signature_ok = sanitize_key((string)($batch['signature_status'] ?? '')) === 'verified'
-            && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['signature_xml_sha256'] ?? ''))
-            && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['signature_certificate_sha256'] ?? ''));
+        $signature_ok = sanitize_key((string)($batch['signature_status'] ?? '')) === 'verified' && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['signature_xml_sha256'] ?? '')) && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['signature_certificate_sha256'] ?? ''));
         $add('signature_evidence', $signature_ok, $signature_ok ? __('La evidencia de firma local está verificada y completa.', 'sistema-para-farmacias') : __('La firma local verificada o sus hashes de evidencia están incompletos.', 'sistema-para-farmacias'));
-
-        $validation_ok = sanitize_key((string)($batch['validation_status'] ?? '')) === 'valid_local'
-            && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['validation_xml_sha256'] ?? ''))
-            && hash_equals((string)($batch['signature_xml_sha256'] ?? ''), (string)($batch['validation_xml_sha256'] ?? ''));
+        $validation_ok = sanitize_key((string)($batch['validation_status'] ?? '')) === 'valid_local' && preg_match('/^[a-f0-9]{64}$/i', (string)($batch['validation_xml_sha256'] ?? '')) && hash_equals((string)($batch['signature_xml_sha256'] ?? ''), (string)($batch['validation_xml_sha256'] ?? ''));
         $add('validation_evidence', $validation_ok, $validation_ok ? __('La validación local corresponde al XML firmado exacto.', 'sistema-para-farmacias') : __('La validación local no corresponde al XML firmado exacto o no es valid_local.', 'sistema-para-farmacias'));
-
         $context = $integrity_ok ? (array)($integrity['context'] ?? []) : [];
         if ($integrity_ok) { $context['identifier'] = (string)($integrity['identifier'] ?? $batch['identifier'] ?? ''); }
         $resources = SPF_Fiscal_Batch_Lifecycle::validation_resources((string)($batch['batch_type'] ?? ''), $context);
@@ -55,8 +37,6 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
         $xsl_ok = !empty($resources['xsl_path']) && is_file($resources['xsl_path']) && is_readable($resources['xsl_path']);
         $add('xsd_resource', $xsd_ok, $xsd_ok ? __('El XSD específico del lote está disponible y es legible.', 'sistema-para-farmacias') : __('Falta el XSD externo específico del lote o no es legible.', 'sistema-para-farmacias'));
         $add('xsl_resource', $xsl_ok, $xsl_ok ? __('El XSL específico del lote está disponible y es legible.', 'sistema-para-farmacias') : __('Falta el XSL externo específico del lote o no es legible.', 'sistema-para-farmacias'));
-
-        $signed = null;
         $local_revalidation_ok = false;
         if ($integrity_ok && $signature_ok && $xsd_ok && $xsl_ok) {
             $signed = SPF_Fiscal_Batch_Lifecycle::build_signed_payload($batch_id);
@@ -68,23 +48,17 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
                     $validation = $validator->validate((string)($signed['xml'] ?? ''), $resources, $context);
                     if (!is_wp_error($validation)) {
                         $checks_result = (array)($validation['checks'] ?? []);
-                        $local_revalidation_ok = !empty($validation['ok'])
-                            && ($checks_result['xsd'] ?? '') === 'valid'
-                            && ($checks_result['xsl'] ?? '') === 'valid';
+                        $local_revalidation_ok = !empty($validation['ok']) && ($checks_result['xsd'] ?? '') === 'valid' && ($checks_result['xsl'] ?? '') === 'valid';
                     }
                 }
             }
         }
         $add('current_local_revalidation', $local_revalidation_ok, $local_revalidation_ok ? __('El XML firmado reproducido vuelve a superar XSD y XSL sin modificar el lote.', 'sistema-para-farmacias') : __('No se pudo demostrar una revalidación XSD/XSL actual y side-effect free.', 'sistema-para-farmacias'));
-
         $ticket = trim((string)($batch['remote_ticket'] ?? ''));
         $recoverable = $ticket === '' ? SPF_Fiscal_Batch_Beta_Manager::recoverable_ticket($batch_id) : null;
         $remote_clean = $ticket === '' && !$recoverable;
         $add('remote_state_clean', $remote_clean, $remote_clean ? __('El lote no tiene ticket asociado ni recuperable; puede evaluarse para un primer envío.', 'sistema-para-farmacias') : ($ticket !== '' ? __('El lote ya tiene ticket remoto y no debe reenviarse.', 'sistema-para-farmacias') : __('Existe un ticket recuperable en el ledger; debe recuperarse y no reenviarse.', 'sistema-para-farmacias')), 'state');
-
-        $transport_inspection_ok = false;
-        $transport_errors = [];
-        $transport_warnings = [];
+        $transport_inspection_ok = false; $transport_errors = []; $transport_warnings = [];
         if ($transport && $integrity_ok && $signature_ok && $validation_ok && $local_revalidation_ok && $remote_clean) {
             $package = SPF_Fiscal_Batch_Beta_Manager::build_submit_package($batch_id);
             if (!is_wp_error($package)) {
@@ -93,35 +67,23 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
                     $transport_inspection_ok = !empty($inspection['ok']);
                     $transport_errors = array_map('sanitize_text_field', (array)($inspection['errors'] ?? []));
                     $transport_warnings = array_map('sanitize_text_field', (array)($inspection['warnings'] ?? []));
-                } else {
-                    $transport_errors[] = $inspection->get_error_message();
-                }
-            } else {
-                $transport_errors[] = $package->get_error_message();
-            }
+                } else { $transport_errors[] = $inspection->get_error_message(); }
+            } else { $transport_errors[] = $package->get_error_message(); }
         }
         $add('transport_inspection', $transport_inspection_ok, $transport_inspection_ok ? __('El paquete supera la inspección local del transporte beta.', 'sistema-para-farmacias') : ($transport_errors ? implode(' ', $transport_errors) : __('No se pudo completar la inspección local del transporte beta.', 'sistema-para-farmacias')));
-
         $opt_in = $transport && $transport->batch_enabled();
         $add('beta_opt_in', $opt_in, $opt_in ? __('El doble opt-in del beta de lotes está habilitado.', 'sistema-para-farmacias') : __('El beta de lotes está bloqueado por configuración; no habrá transmisión remota.', 'sistema-para-farmacias'));
-
         $required_failures = 0;
-        foreach ($checks as $check) {
-            if ($check['severity'] === 'required' && !$check['ok']) { $required_failures++; }
-        }
-        $ready_for_submit = $required_failures === 0 && $remote_clean && $opt_in && $transport_inspection_ok;
-        $ready_for_poll = $ticket !== '' && (bool)$transport && $opt_in && $integrity_ok;
-        $ready_for_recovery = is_array($recoverable);
-
+        foreach ($checks as $check) { if ($check['severity'] === 'required' && !$check['ok']) { $required_failures++; } }
         return [
             'batch_id'=>$batch_id,
             'identifier'=>sanitize_text_field((string)($batch['identifier'] ?? '')),
             'checked_at'=>current_time('mysql'),
-            'ready_for_submit'=>$ready_for_submit,
-            'ready_for_poll'=>$ready_for_poll,
-            'ready_for_recovery'=>$ready_for_recovery,
+            'ready_for_submit'=>$required_failures === 0 && $remote_clean && $opt_in && $transport_inspection_ok,
+            'ready_for_poll'=>$ticket !== '' && (bool)$transport && $opt_in && $integrity_ok,
+            'ready_for_recovery'=>is_array($recoverable),
             'remote_ticket'=>$ticket,
-            'recoverable_ticket'=>$ready_for_recovery ? sanitize_text_field((string)($recoverable['ticket'] ?? '')) : '',
+            'recoverable_ticket'=>is_array($recoverable) ? sanitize_text_field((string)($recoverable['ticket'] ?? '')) : '',
             'checks'=>$checks,
             'transport_warnings'=>$transport_warnings,
             'network_performed'=>false,
@@ -133,7 +95,6 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
         if (!$batch) { return new WP_Error('spf_beta_export_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
         $diagnostics = self::inspect($batch_id);
         if (is_wp_error($diagnostics)) { return $diagnostics; }
-
         $events = [];
         foreach ((array)SPF_Fiscal_Batch_Remote_Event_Repository::latest($batch_id, 100) as $row) {
             $events[] = [
@@ -155,7 +116,6 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
             ];
         }
         $events = array_reverse($events);
-
         $payload = [
             'schema'=>'spf-fiscal-beta-evidence-v1',
             'plugin_version'=>defined('SPF_VERSION') ? SPF_VERSION : '',
@@ -180,64 +140,83 @@ final class SPF_Fiscal_Batch_Beta_Diagnostics {
             'diagnostics'=>$diagnostics,
             'events'=>$events,
         ];
-        $encoded = wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $payload['export_sha256'] = hash('sha256', (string)$encoded);
+        $payload['export_sha256'] = hash('sha256', (string)wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         return $payload;
     }
 
     public static function consume_notice() {
         $key = self::NOTICE_PREFIX . get_current_user_id();
-        $value = get_transient($key);
-        delete_transient($key);
+        $value = get_transient($key); delete_transient($key);
         return is_array($value) ? $value : null;
+    }
+
+    public function render_admin_panel() {
+        if (!is_admin() || (!current_user_can(SPF_Roles::INVOICES) && !current_user_can('manage_options'))) { return; }
+        if (sanitize_key((string)($_GET['page'] ?? '')) !== 'spf-fiscal') { return; }
+        $notice = self::consume_notice();
+        if ($notice) {
+            $class = ($notice['type'] ?? '') === 'error' ? 'notice-error' : (($notice['type'] ?? '') === 'success' ? 'notice-success' : 'notice-warning');
+            echo '<div class="notice ' . esc_attr($class) . ' is-dismissible"><p><strong>' . esc_html((string)($notice['message'] ?? '')) . '</strong></p>';
+            $diagnostics = is_array($notice['diagnostics'] ?? null) ? $notice['diagnostics'] : null;
+            if ($diagnostics) {
+                echo '<ul style="margin-left:18px;list-style:disc">';
+                foreach ((array)($diagnostics['checks'] ?? []) as $check) {
+                    echo '<li><strong>' . esc_html((!empty($check['ok']) ? '✓ ' : '✕ ') . (string)($check['code'] ?? '')) . '</strong> — ' . esc_html((string)($check['message'] ?? '')) . '</li>';
+                }
+                echo '</ul><p><code>network_performed=' . esc_html(!empty($diagnostics['network_performed']) ? 'true' : 'false') . '</code></p>';
+            }
+            echo '</div>';
+        }
+        $batches = SPF_Fiscal_Batch_Repository::latest(10);
+        echo '<div class="notice notice-info" style="padding:12px 16px"><h2 style="margin-top:0">' . esc_html__('Preparación beta controlada · sin red', 'sistema-para-farmacias') . '</h2>';
+        echo '<p>' . esc_html__('Ejecuta el diagnóstico antes de una prueba real. Verifica runtime, snapshot, firma, XSD/XSL, revalidación actual, transporte y opt-in sin enviar nada. El export JSON contiene únicamente evidencia sanitizada y hashes.', 'sistema-para-farmacias') . '</p>';
+        if (!$batches) { echo '<p>' . esc_html__('Todavía no hay lotes fiscales persistidos para diagnosticar.', 'sistema-para-farmacias') . '</p></div>'; return; }
+        echo '<div style="overflow:auto"><table class="widefat striped"><thead><tr><th>' . esc_html__('Lote', 'sistema-para-farmacias') . '</th><th>' . esc_html__('Beta', 'sistema-para-farmacias') . '</th><th>' . esc_html__('Ticket', 'sistema-para-farmacias') . '</th><th>' . esc_html__('Timeline', 'sistema-para-farmacias') . '</th><th>' . esc_html__('Preparación', 'sistema-para-farmacias') . '</th></tr></thead><tbody>';
+        foreach ((array)$batches as $batch) {
+            $batch_id = absint($batch['id'] ?? 0); $events = SPF_Fiscal_Batch_Remote_Event_Repository::latest($batch_id, 5);
+            echo '<tr><td><strong>' . esc_html((string)($batch['identifier'] ?? '')) . '</strong><br><small>' . esc_html((string)($batch['reference_date'] ?? '')) . '</small></td><td><code>' . esc_html((string)($batch['beta_status'] ?? 'not_tested')) . '</code></td><td>' . (!empty($batch['remote_ticket']) ? '<code>' . esc_html((string)$batch['remote_ticket']) . '</code>' : '—') . '</td><td>';
+            if ($events) {
+                echo '<details><summary>' . esc_html(sprintf(__('%d eventos', 'sistema-para-farmacias'), count($events))) . '</summary><ol style="margin:8px 0 0 18px">';
+                foreach (array_reverse((array)$events) as $event) {
+                    $line = (string)($event['operation'] ?? '') . ' · ' . (string)($event['created_at'] ?? '');
+                    if (!empty($event['status_code'])) { $line .= ' · status=' . (string)$event['status_code']; }
+                    echo '<li><code>' . esc_html($line) . '</code></li>';
+                }
+                echo '</ol></details>';
+            } else { echo '—'; }
+            echo '</td><td><div style="display:flex;gap:6px;flex-wrap:wrap"><form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+            wp_nonce_field('spf_fiscal_batch_beta_diagnostics');
+            echo '<input type="hidden" name="action" value="spf_fiscal_batch_beta_diagnostics"><input type="hidden" name="batch_id" value="' . esc_attr($batch_id) . '"><button class="button">' . esc_html__('Diagnóstico beta', 'sistema-para-farmacias') . '</button></form><form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+            wp_nonce_field('spf_fiscal_batch_beta_evidence_export');
+            echo '<input type="hidden" name="action" value="spf_fiscal_batch_beta_evidence_export"><input type="hidden" name="batch_id" value="' . esc_attr($batch_id) . '"><button class="button">' . esc_html__('Exportar evidencia JSON', 'sistema-para-farmacias') . '</button></form></div></td></tr>';
+        }
+        echo '</tbody></table></div></div>';
     }
 
     public function handle_diagnostics() {
         if (!current_user_can(SPF_Roles::INVOICES) && !current_user_can('manage_options')) { wp_die(esc_html__('No tienes permisos para diagnosticar lotes fiscales.', 'sistema-para-farmacias')); }
         check_admin_referer('spf_fiscal_batch_beta_diagnostics');
-        $batch_id = absint($_POST['batch_id'] ?? 0);
-        $result = self::inspect($batch_id);
-        if (is_wp_error($result)) {
-            $notice = ['type'=>'error','message'=>$result->get_error_message(),'batch_id'=>$batch_id];
-        } else {
+        $batch_id = absint($_POST['batch_id'] ?? 0); $result = self::inspect($batch_id);
+        if (is_wp_error($result)) { $notice = ['type'=>'error','message'=>$result->get_error_message(),'batch_id'=>$batch_id]; }
+        else {
             $failed = array_values(array_filter((array)$result['checks'], static function($check){ return empty($check['ok']); }));
-            $notice = [
-                'type'=>!empty($result['ready_for_submit']) ? 'success' : 'warning',
-                'message'=>!empty($result['ready_for_submit']) ? __('Diagnóstico beta: lote listo para un envío controlado. No se realizó ninguna llamada de red.', 'sistema-para-farmacias') : sprintf(__('Diagnóstico beta completado sin red: %d comprobaciones no están listas.', 'sistema-para-farmacias'), count($failed)),
-                'batch_id'=>$batch_id,
-                'diagnostics'=>$result,
-            ];
+            $notice = ['type'=>!empty($result['ready_for_submit']) ? 'success' : 'warning','message'=>!empty($result['ready_for_submit']) ? __('Diagnóstico beta: lote listo para un envío controlado. No se realizó ninguna llamada de red.', 'sistema-para-farmacias') : sprintf(__('Diagnóstico beta completado sin red: %d comprobaciones no están listas.', 'sistema-para-farmacias'), count($failed)),'batch_id'=>$batch_id,'diagnostics'=>$result];
         }
-        set_transient(self::NOTICE_PREFIX . get_current_user_id(), $notice, 5 * MINUTE_IN_SECONDS);
-        wp_safe_redirect(admin_url('admin.php?page=spf-fiscal')); exit;
+        set_transient(self::NOTICE_PREFIX . get_current_user_id(), $notice, 5 * MINUTE_IN_SECONDS); wp_safe_redirect(admin_url('admin.php?page=spf-fiscal')); exit;
     }
 
     public function handle_export() {
         if (!current_user_can(SPF_Roles::INVOICES) && !current_user_can('manage_options')) { wp_die(esc_html__('No tienes permisos para exportar evidencia fiscal.', 'sistema-para-farmacias')); }
         check_admin_referer('spf_fiscal_batch_beta_evidence_export');
-        $batch_id = absint($_POST['batch_id'] ?? 0);
-        $payload = self::export_payload($batch_id);
+        $batch_id = absint($_POST['batch_id'] ?? 0); $payload = self::export_payload($batch_id);
         if (is_wp_error($payload)) { wp_die(esc_html($payload->get_error_message())); }
         $identifier = sanitize_file_name((string)($payload['batch']['identifier'] ?? ('batch-' . $batch_id)));
-        nocache_headers();
-        header('Content-Type: application/json; charset=utf-8');
-        header('Content-Disposition: attachment; filename="spf-beta-evidence-' . $identifier . '.json"');
-        echo wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
+        nocache_headers(); header('Content-Type: application/json; charset=utf-8'); header('Content-Disposition: attachment; filename="spf-beta-evidence-' . $identifier . '.json"');
+        echo wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); exit;
     }
 
     private static function runtime_capabilities() {
-        return [
-            'dom'=>class_exists('DOMDocument'),
-            'openssl'=>extension_loaded('openssl'),
-            'soap'=>class_exists('SoapClient'),
-            'xsl'=>class_exists('XSLTProcessor'),
-            'zip'=>class_exists('ZipArchive'),
-        ];
+        return ['dom'=>class_exists('DOMDocument'),'openssl'=>extension_loaded('openssl'),'soap'=>class_exists('SoapClient'),'xsl'=>class_exists('XSLTProcessor'),'zip'=>class_exists('ZipArchive')];
     }
-
-    private static function sha($value) {
-        $value = strtolower(trim((string)$value));
-        return preg_match('/^[a-f0-9]{64}$/', $value) ? $value : '';
-    }
+    private static function sha($value) { $value = strtolower(trim((string)$value)); return preg_match('/^[a-f0-9]{64}$/', $value) ? $value : ''; }
 }
