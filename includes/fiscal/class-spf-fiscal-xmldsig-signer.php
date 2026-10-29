@@ -89,7 +89,7 @@ final class SPF_Fiscal_XMLDSig_Signer implements SPF_Fiscal_Signer_Interface {
         $digest_value = $doc->createElementNS(self::DS_NS, 'ds:DigestValue');
         $reference->appendChild($digest_value);
 
-        $digest_input = $this->canonical_document_without_signature($doc, $with_comments);
+        $digest_input = $this->canonical_document_without_signature($doc, false);
         if (is_wp_error($digest_input)) { return $digest_input; }
         $digest_value->appendChild($doc->createTextNode(base64_encode(hash($digest_algo, $digest_input, true))));
 
@@ -170,7 +170,7 @@ final class SPF_Fiscal_XMLDSig_Signer implements SPF_Fiscal_Signer_Interface {
             return new WP_Error('spf_fiscal_signature_algorithm_verify', __('La firma usa algoritmos no soportados por el verificador local.', 'sistema-para-farmacias'));
         }
 
-        $digest_input = $this->canonical_document_without_signature($doc, $with_comments);
+        $digest_input = $this->canonical_document_without_signature($doc, false);
         if (is_wp_error($digest_input)) { return $digest_input; }
         $expected_digest = base64_encode(hash($digest_algo, $digest_input, true));
         if (!hash_equals(trim((string) $digest_node->textContent), $expected_digest)) {
