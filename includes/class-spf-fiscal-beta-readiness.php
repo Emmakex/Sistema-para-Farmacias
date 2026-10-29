@@ -21,12 +21,20 @@ final class SPF_Fiscal_Beta_Readiness {
         $readiness_profile = SPF_Config::get('electronic_invoicing.readiness_profile', []);
         $readiness_profile = is_array($readiness_profile) ? $readiness_profile : [];
         $issuer_profile = is_array($readiness_profile['issuer'] ?? null) ? $readiness_profile['issuer'] : [];
+        $transport_runtime = is_array($readiness_profile['transport_runtime'] ?? null) ? $readiness_profile['transport_runtime'] : [];
 
         $checks = [];
         $checks['runtime_openssl'] = self::check('OpenSSL', extension_loaded('openssl') && function_exists('openssl_pkcs12_read'), __('Extensión OpenSSL disponible.', 'sistema-para-farmacias'), __('OpenSSL/PKCS#12 no está disponible.', 'sistema-para-farmacias'));
         $checks['runtime_dom'] = self::check('DOM', class_exists('DOMDocument') && class_exists('DOMXPath'), __('DOM/XML disponible.', 'sistema-para-farmacias'), __('DOM/XML no está disponible.', 'sistema-para-farmacias'));
         $checks['runtime_zip'] = self::check('ZIP', class_exists('ZipArchive'), __('ZipArchive disponible.', 'sistema-para-farmacias'), __('La extensión ZIP de PHP no está disponible.', 'sistema-para-farmacias'));
-        $checks['runtime_soap'] = self::check('SOAP', class_exists('SoapClient'), __('SOAP disponible para el transporte beta.', 'sistema-para-farmacias'), __('La extensión SOAP de PHP no está disponible.', 'sistema-para-farmacias'));
+        $runtime_extension = sanitize_key((string)($transport_runtime['extension'] ?? ''));
+        $runtime_remote_ready = $runtime_extension !== '' && extension_loaded($runtime_extension);
+        $checks['runtime_remote_transport'] = self::check(
+            __('Runtime del transporte beta', 'sistema-para-farmacias'),
+            $runtime_remote_ready,
+            __('La dependencia runtime declarada por el transporte del país activo está disponible.', 'sistema-para-farmacias'),
+            __('Falta la dependencia runtime declarada para el transporte beta del país activo.', 'sistema-para-farmacias')
+        );
 
         $required_fields = array_values(array_filter(array_map('sanitize_key', (array)($issuer_profile['required_fields'] ?? []))));
         $tax_id_pattern = trim((string)($issuer_profile['tax_id_pattern'] ?? ''));
@@ -80,11 +88,11 @@ final class SPF_Fiscal_Beta_Readiness {
         $checks['production_guard'] = self::check(__('Producción', 'sistema-para-farmacias'), (bool)$production_blocked, __('Producción permanece bloqueada.', 'sistema-para-farmacias'), __('El perfil beta no debe habilitar producción.', 'sistema-para-farmacias'));
 
         $invoice_required = [
-            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
+            'runtime_openssl','runtime_dom','runtime_zip','runtime_remote_transport','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
             'invoice_xsd','invoice_xsl','evidence_store','document_ledger','invoice_transport','invoice_optin','production_guard',
         ];
         $batch_required = [
-            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
+            'runtime_openssl','runtime_dom','runtime_zip','runtime_remote_transport','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
             'batch_xsd','batch_xsl','evidence_store','batch_ledger','batch_transport','batch_builder','batch_optin','production_guard',
         ];
 
