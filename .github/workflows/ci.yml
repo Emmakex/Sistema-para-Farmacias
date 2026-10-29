@@ -22,8 +22,10 @@ jobs:
         run: php tests/fiscal-batch-persistence-smoke.php
       - name: Fiscal batch SummaryDocuments signing and validation smoke
         run: php tests/fiscal-batch-sign-validate-smoke.php
-      - name: Peru beta fail-closed smoke
+      - name: Peru invoice beta fail-closed smoke
         run: php tests/fiscal-beta-smoke.php
+      - name: Peru daily summary beta fail-closed smoke
+        run: php tests/fiscal-beta-summary-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -32,6 +34,7 @@ jobs:
             --include='*.php' \
             --exclude-dir='countries' \
             --exclude='fiscal-beta-smoke.php' \
+            --exclude='fiscal-beta-summary-smoke.php' \
             --exclude='fiscal-daily-summary-smoke.php' \
             --exclude='fiscal-batch-persistence-smoke.php' \
             --exclude='fiscal-batch-sign-validate-smoke.php' \
@@ -50,25 +53,27 @@ jobs:
             --include='*.php' \
             --exclude='class-spf-fiscal-transport-peru-beta.php' \
             --exclude='fiscal-beta-smoke.php' \
+            --exclude='fiscal-beta-summary-smoke.php' \
             includes tests || true)"
           if [ -n "$violations" ]; then
             echo "Network transport leaked outside the isolated beta transport:"
             echo "$violations"
             exit 1
           fi
-      - name: Peru beta transport remains test-only
+      - name: Peru beta transport remains test-only and isolated
         shell: bash
         run: |
           set -euo pipefail
           beta='includes/countries/peru/class-spf-fiscal-transport-peru-beta.php'
           grep -Fq 'https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService?wsdl' "$beta"
           grep -Fq "__soapCall('sendBill'" "$beta"
+          grep -Fq "__soapCall('sendSummary'" "$beta"
+          grep -Fq "__soapCall('getStatus'" "$beta"
           grep -Fq "const TEST_USER = 'MODDATOS'" "$beta"
           grep -Fq "const TEST_PASSWORD = 'MODDATOS'" "$beta"
-          if grep -En "__soapCall\(['\"](?:sendSummary|getStatus)['\"]" "$beta"; then
-            echo "Asynchronous SOAP operations are forbidden until the daily summary transport cut"
-            exit 1
-          fi
+          grep -Fq 'SPF_FISCAL_BETA_SUMMARY_ENABLED' "$beta"
+          grep -Fq 'SPF_FISCAL_BETA_SUMMARY_CONFIRMATION' "$beta"
+          grep -Fq 'SUNAT_SUMMARY_TEST_ONLY' "$beta"
           if grep -Fq 'e-factura.sunat.gob.pe' "$beta"; then
             echo "Production endpoint is forbidden in the beta transport"
             exit 1
@@ -77,8 +82,14 @@ jobs:
             echo "Production fiscal endpoint must remain absent from PHP"
             exit 1
           fi
+          async_leaks="$(grep -RInE "__soapCall\(['\"](?:sendSummary|getStatus)['\"]" --include='*.php' --exclude='class-spf-fiscal-transport-peru-beta.php' includes tests || true)"
+          if [ -n "$async_leaks" ]; then
+            echo "Asynchronous authority operations leaked outside the isolated country transport:"
+            echo "$async_leaks"
+            exit 1
+          fi
           grep -Fq "'default_transport'=>'dry_run'" includes/countries/class-spf-country-peru.php
-      - name: Daily summary remains local-only
+      - name: Daily summary builder and lifecycle remain network-free
         shell: bash
         run: |
           set -euo pipefail
@@ -87,8 +98,8 @@ jobs:
           grep -Fq "'1.1'" "$builder"
           grep -Fq "'03'" "$builder"
           grep -Fq "'ConditionCode'" "$builder"
-          if grep -RInE "__soapCall|sendSummary|getStatus" --include='*batch*.php' includes; then
-            echo "Daily summary builder must remain network-free"
+          if grep -RInE "__soapCall|sendSummary|getStatus|e-beta\.sunat\.gob\.pe" --include='*batch*.php' includes; then
+            echo "Generic batch layers must remain network-free and authority-neutral"
             exit 1
           fi
       - name: Fiscal batch persistence invariants
@@ -117,10 +128,6 @@ jobs:
             echo "Batch and batch-item snapshot bodies must both be persisted"
             exit 1
           fi
-          if grep -RInE "__soapCall|sendSummary|getStatus" --include='*batch*.php' includes; then
-            echo "Persistent batch layer must remain network-free"
-            exit 1
-          fi
       - name: Fiscal batch signing and validation invariants
         shell: bash
         run: |
@@ -134,6 +141,7 @@ jobs:
           grep -Fq 'signature_certificate_sha256' "$lifecycle"
           grep -Fq 'hash_equals($stored_signed_hash, $current_signed_hash)' "$lifecycle"
           grep -Fq 'hash_equals($stored_certificate_hash, $current_certificate_hash)' "$lifecycle"
+          grep -Fq "remote_ticket" "$lifecycle"
           grep -Fq 'snapshot_sha256' "$integrity"
           grep -Fq 'xml_sha256' "$integrity"
           grep -Fq "'SPF_FISCAL_PERU_SUMMARY_XSD_PATH'" "$country"
@@ -141,8 +149,30 @@ jobs:
           grep -Fq 'signature_certificate_sha256 VARCHAR(64)' "$activator"
           grep -Fq 'signature_xml_sha256 VARCHAR(64)' "$activator"
           grep -Fq 'validation_xml_sha256 VARCHAR(64)' "$activator"
-          if grep -RInE "__soapCall|sendSummary|getStatus|wp_remote_|curl_" --include='*batch*.php' includes; then
-            echo "Batch signing/validation cut must remain local-only"
+      - name: Async fiscal batch beta invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          contract='includes/fiscal/interface-spf-fiscal-async-batch-transport.php'
+          country='includes/countries/class-spf-country-peru.php'
+          grep -Fq 'submit_batch(array $package)' "$contract"
+          grep -Fq 'poll_batch(array $package)' "$contract"
+          grep -Fq "'beta_transport'=>'peru_beta'" "$country"
+          grep -Fq 'SPF_Fiscal_Batch_Lifecycle::validate_batch' "$manager"
+          grep -Fq 'SPF_Fiscal_Batch_Integrity::reconstruct' "$manager"
+          grep -Fq 'validation_xml_sha256' "$manager"
+          grep -Fq 'signature_certificate_sha256' "$manager"
+          grep -Fq "remote_ticket" "$manager"
+          grep -Fq "'production'=>false" "$manager"
+          grep -Fq 'SUBMIT_COOLDOWN' "$manager"
+          grep -Fq 'POLL_COOLDOWN' "$manager"
+          if grep -En "['\"]fiscal_status['\"]\s*=>" "$manager"; then
+            echo "Beta batch manager must never write fiscal_status"
+            exit 1
+          fi
+          if grep -En 'SUNAT|MODDATOS|sendSummary|getStatus|e-beta\.sunat\.gob\.pe' "$manager"; then
+            echo "Authority-specific beta literals leaked into generic batch manager"
             exit 1
           fi
       - name: Fiscal credentials stay outside repository and database
