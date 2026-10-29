@@ -2,6 +2,7 @@
 error_reporting(E_ALL);
 define('ABSPATH', __DIR__ . '/');
 define('SPF_VERSION', 'ci');
+define('DAY_IN_SECONDS', 86400);
 
 class WP_Error {
     private $code; private $message;
@@ -12,13 +13,18 @@ class WP_Error {
 function is_wp_error($value){ return $value instanceof WP_Error; }
 function __($text, $domain=null){ return $text; }
 function sanitize_text_field($value){ return trim(strip_tags((string)$value)); }
+function wp_date($format){ return date($format, strtotime('2026-10-29 10:00:00 UTC')); }
 
 require_once __DIR__ . '/../includes/fiscal/interface-spf-fiscal-transport.php';
+require_once __DIR__ . '/../includes/fiscal/interface-spf-fiscal-async-batch-transport.php';
 require_once __DIR__ . '/../includes/countries/peru/class-spf-fiscal-transport-peru-beta.php';
 
 $transport = new SPF_Fiscal_Transport_Peru_Beta();
 if (SPF_Fiscal_Transport_Peru_Beta::enabled()) {
     fwrite(STDERR, "Beta must be disabled by default\n"); exit(1);
+}
+if ($transport->batch_enabled()) {
+    fwrite(STDERR, "Batch beta must be independently disabled by default\n"); exit(1);
 }
 
 $package = [
@@ -49,7 +55,7 @@ $receipt['strategy'] = 'daily_summary';
 $receipt['fiscal_type_code'] = '03';
 $receiptInspection = $transport->inspect($receipt);
 if (!empty($receiptInspection['ok'])) {
-    fwrite(STDERR, "Individual receipt must remain blocked until daily summary support exists\n"); exit(1);
+    fwrite(STDERR, "Individual receipt must remain blocked; daily summary uses the async batch path\n"); exit(1);
 }
 
 $unsigned = $package;
