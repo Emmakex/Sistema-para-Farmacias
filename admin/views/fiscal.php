@@ -69,7 +69,7 @@ $rows = $wpdb->get_results(
 
     <div class="spf-panel">
         <h2><?php esc_html_e('Cadena fiscal', 'sistema-para-farmacias'); ?></h2>
-        <p><?php esc_html_e('Preflight → firma XMLDSig → validación XSD/XSL → transporte controlado. Los comprobantes agrupables pasan por lotes fiscales persistentes; el beta de lotes usa ticket asíncrono y nunca modifica el estado fiscal de producción.', 'sistema-para-farmacias'); ?></p>
+        <p><?php esc_html_e('Preflight → firma XMLDSig → validación XSD/XSL → transporte controlado. Los lotes remotos conservan un ledger append-only de evidencias; el beta nunca modifica el estado fiscal de producción.', 'sistema-para-farmacias'); ?></p>
         <div class="spf-config-summary">
             <span><strong><?php esc_html_e('País','sistema-para-farmacias'); ?></strong><?php echo esc_html(SPF_Config::get('name', SPF_Config::country_code())); ?></span>
             <span><strong><?php esc_html_e('Autoridad','sistema-para-farmacias'); ?></strong><?php echo esc_html($authority); ?></span>
@@ -84,7 +84,7 @@ $rows = $wpdb->get_results(
         <?php if (!$issuer['tax_id'] || !$issuer['legal_name'] || !$issuer['address']): ?>
             <p class="spf-message error"><?php esc_html_e('Completa primero la identidad fiscal del emisor en Configuración.','sistema-para-farmacias'); ?> <a href="<?php echo esc_url(admin_url('admin.php?page=spf-settings')); ?>"><?php esc_html_e('Ir a Configuración','sistema-para-farmacias'); ?></a></p>
         <?php endif; ?>
-        <p class="description"><?php esc_html_e('Certificado: SPF_FISCAL_P12_PATH / SPF_FISCAL_P12_PASSWORD. Los validadores oficiales permanecen fuera del plugin. El beta individual y el beta de lotes requieren activaciones explícitas independientes.','sistema-para-farmacias'); ?></p>
+        <p class="description"><?php esc_html_e('Certificado: SPF_FISCAL_P12_PATH / SPF_FISCAL_P12_PASSWORD. Los validadores oficiales permanecen fuera del plugin. El ledger remoto guarda hashes, tickets, códigos y timestamps; nunca almacena claves privadas ni ZIP/XML completos.','sistema-para-farmacias'); ?></p>
         <?php if ($beta_enabled || $batch_beta_enabled): ?>
             <p class="spf-message warning"><strong><?php echo esc_html(sprintf(__('%s beta habilitado para alguna operación.','sistema-para-farmacias'), $authority)); ?></strong> <?php esc_html_e('Úsalo únicamente con datos de prueba y de forma puntual. Ninguna respuesta beta equivale a una aceptación fiscal de producción.','sistema-para-farmacias'); ?></p>
         <?php else: ?>
@@ -102,6 +102,7 @@ $rows = $wpdb->get_results(
             <span><strong><?php esc_html_e('Lote diario','sistema-para-farmacias'); ?></strong><span class="spf-badge <?php echo $batch_builder ? 'ok' : 'neutral'; ?>"><?php echo esc_html($batch_builder ? __('Snapshot + firma local','sistema-para-farmacias') : __('No configurado','sistema-para-farmacias')); ?></span></span>
             <span><strong><?php esc_html_e('XSD lote','sistema-para-farmacias'); ?></strong><span class="spf-badge <?php echo $has_batch_xsd ? 'ok' : 'neutral'; ?>"><?php echo esc_html($has_batch_xsd ? __('Configurado','sistema-para-farmacias') : __('Pendiente','sistema-para-farmacias')); ?></span></span>
             <span><strong><?php esc_html_e('XSL lote','sistema-para-farmacias'); ?></strong><span class="spf-badge <?php echo $has_batch_xsl ? 'ok' : 'neutral'; ?>"><?php echo esc_html($has_batch_xsl ? __('Configurado','sistema-para-farmacias') : __('Pendiente','sistema-para-farmacias')); ?></span></span>
+            <span><strong><?php esc_html_e('Ledger remoto','sistema-para-farmacias'); ?></strong><span class="spf-badge ok"><?php esc_html_e('Append-only','sistema-para-farmacias'); ?></span></span>
             <span><strong><?php esc_html_e('Beta individual','sistema-para-farmacias'); ?></strong><span class="spf-badge <?php echo $beta_enabled ? 'ok' : 'neutral'; ?>"><?php echo esc_html($beta_enabled ? __('Habilitado para pruebas','sistema-para-farmacias') : __('Bloqueado','sistema-para-farmacias')); ?></span></span>
             <span><strong><?php esc_html_e('Beta lote','sistema-para-farmacias'); ?></strong><span class="spf-badge <?php echo $batch_beta_enabled ? 'ok' : 'neutral'; ?>"><?php echo esc_html($batch_beta_enabled ? __('Habilitado para pruebas','sistema-para-farmacias') : __('Bloqueado','sistema-para-farmacias')); ?></span></span>
             <span><strong><?php esc_html_e('Producción','sistema-para-farmacias'); ?></strong><span class="spf-badge danger"><?php esc_html_e('Bloqueada','sistema-para-farmacias'); ?></span></span>
@@ -140,9 +141,9 @@ $rows = $wpdb->get_results(
         <h2><?php esc_html_e('Lotes fiscales persistidos','sistema-para-farmacias'); ?></h2>
         <div class="spf-table-scroll spf-table-wide">
             <table class="widefat striped">
-                <thead><tr><th><?php esc_html_e('Identificador','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Fecha','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Comprobantes','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Interno','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Firma','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Validación','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Beta','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Ticket','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Fiscal','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Acciones','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Creado','sistema-para-farmacias'); ?></th></tr></thead>
+                <thead><tr><th><?php esc_html_e('Identificador','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Fecha','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Comprobantes','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Interno','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Firma','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Validación','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Beta','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Ticket','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Evidencia','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Fiscal','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Acciones','sistema-para-farmacias'); ?></th><th><?php esc_html_e('Creado','sistema-para-farmacias'); ?></th></tr></thead>
                 <tbody>
-                <?php if (!$persisted_batches): ?><tr><td colspan="11"><?php esc_html_e('Todavía no hay lotes persistidos.','sistema-para-farmacias'); ?></td></tr><?php endif; ?>
+                <?php if (!$persisted_batches): ?><tr><td colspan="12"><?php esc_html_e('Todavía no hay lotes persistidos.','sistema-para-farmacias'); ?></td></tr><?php endif; ?>
                 <?php foreach ((array)$persisted_batches as $batch):
                     $batch_internal=sanitize_key($batch['internal_status']??'prepared');
                     $batch_signature=sanitize_key($batch['signature_status']??'not_signed');
@@ -150,9 +151,12 @@ $rows = $wpdb->get_results(
                     $batch_beta=sanitize_key($batch['beta_status']??'not_tested');
                     $batch_fiscal=sanitize_key($batch['fiscal_status']??'not_sent');
                     $batch_ticket=trim((string)($batch['remote_ticket']??''));
+                    $recoverable=$batch_ticket==='' ? SPF_Fiscal_Batch_Beta_Manager::recoverable_ticket($batch['id']) : null;
+                    $latest_events=SPF_Fiscal_Batch_Remote_Event_Repository::latest($batch['id'],1);
+                    $latest_event=$latest_events ? $latest_events[0] : null;
                     $batch_can_validate=$batch_signature==='verified'&&$validator&&$has_batch_validation;
                     $batch_terminal=in_array($batch_beta,['beta_batch_accepted','beta_batch_accepted_with_observation','beta_batch_rejected'],true);
-                    $batch_can_submit=$batch_beta_enabled&&$batch_signature==='verified'&&$batch_validation==='valid_local'&&$batch_ticket==='';
+                    $batch_can_submit=$batch_beta_enabled&&$batch_signature==='verified'&&$batch_validation==='valid_local'&&$batch_ticket===''&&!$recoverable;
                     $batch_can_poll=$batch_beta_enabled&&$batch_ticket!==''&&!$batch_terminal; ?>
                     <tr>
                         <td><strong><?php echo esc_html($batch['identifier']); ?></strong><br><small><?php echo esc_html($batch['batch_type']); ?></small></td>
@@ -162,28 +166,42 @@ $rows = $wpdb->get_results(
                         <td><?php echo esc_html($signature_labels[$batch_signature] ?? $batch_signature); ?></td>
                         <td><?php echo esc_html($validation_labels[$batch_validation] ?? $batch_validation); ?></td>
                         <td><?php echo esc_html($batch_beta_labels[$batch_beta] ?? $batch_beta); ?></td>
-                        <td><?php echo $batch_ticket!=='' ? '<code>'.esc_html($batch_ticket).'</code>' : '—'; ?></td>
+                        <td>
+                            <?php if ($batch_ticket!==''): ?><code><?php echo esc_html($batch_ticket); ?></code>
+                            <?php elseif ($recoverable): ?><small><?php esc_html_e('Recuperable','sistema-para-farmacias'); ?></small><br><code><?php echo esc_html($recoverable['ticket']); ?></code>
+                            <?php else: ?>—<?php endif; ?>
+                        </td>
+                        <td><?php if ($latest_event): ?><code><?php echo esc_html($latest_event['operation']); ?></code><br><small><?php echo esc_html($latest_event['created_at']); ?></small><?php else: ?>—<?php endif; ?></td>
                         <td><?php echo esc_html($fiscal_labels[$batch_fiscal] ?? $batch_fiscal); ?></td>
                         <td><div class="spf-form-actions">
                             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                                 <?php wp_nonce_field('spf_fiscal_batch_sign_local'); ?>
                                 <input type="hidden" name="action" value="spf_fiscal_batch_sign_local">
                                 <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch['id']); ?>">
-                                <button class="button" <?php disabled(!$signer||!$provider||$batch_ticket!==''); ?>><?php esc_html_e('Firmar lote','sistema-para-farmacias'); ?></button>
+                                <button class="button" <?php disabled(!$signer||!$provider||$batch_ticket!==''||$recoverable); ?>><?php esc_html_e('Firmar lote','sistema-para-farmacias'); ?></button>
                             </form>
                             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                                 <?php wp_nonce_field('spf_fiscal_batch_validate_local'); ?>
                                 <input type="hidden" name="action" value="spf_fiscal_batch_validate_local">
                                 <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch['id']); ?>">
-                                <button class="button" <?php disabled(!$batch_can_validate||$batch_ticket!==''); ?>><?php esc_html_e('Validar lote XSD/XSL','sistema-para-farmacias'); ?></button>
+                                <button class="button" <?php disabled(!$batch_can_validate||$batch_ticket!==''||$recoverable); ?>><?php esc_html_e('Validar lote XSD/XSL','sistema-para-farmacias'); ?></button>
                             </form>
                             <?php if ($batch_ticket===''): ?>
-                                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" onsubmit="return confirm('<?php echo esc_js(__('Enviar este LOTE DE PRUEBA al transporte beta fiscal. No uses datos reales ni ejecutes pruebas masivas. La respuesta no cambia el estado fiscal de producción. ¿Continuar?','sistema-para-farmacias')); ?>');">
-                                    <?php wp_nonce_field('spf_fiscal_batch_beta_submit'); ?>
-                                    <input type="hidden" name="action" value="spf_fiscal_batch_beta_submit">
-                                    <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch['id']); ?>">
-                                    <button class="button button-primary" <?php disabled(!$batch_can_submit); ?>><?php esc_html_e('Enviar lote beta','sistema-para-farmacias'); ?></button>
-                                </form>
+                                <?php if ($recoverable): ?>
+                                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" onsubmit="return confirm('<?php echo esc_js(__('Existe un ticket recibido para la misma evidencia criptográfica. Recuperarlo asociará ese ticket al lote sin reenviar nada. ¿Continuar?','sistema-para-farmacias')); ?>');">
+                                        <?php wp_nonce_field('spf_fiscal_batch_beta_recover_ticket'); ?>
+                                        <input type="hidden" name="action" value="spf_fiscal_batch_beta_recover_ticket">
+                                        <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch['id']); ?>">
+                                        <button class="button button-primary"><?php esc_html_e('Recuperar ticket','sistema-para-farmacias'); ?></button>
+                                    </form>
+                                <?php else: ?>
+                                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" onsubmit="return confirm('<?php echo esc_js(__('Enviar este LOTE DE PRUEBA al transporte beta fiscal. No uses datos reales ni ejecutes pruebas masivas. La respuesta no cambia el estado fiscal de producción. ¿Continuar?','sistema-para-farmacias')); ?>');">
+                                        <?php wp_nonce_field('spf_fiscal_batch_beta_submit'); ?>
+                                        <input type="hidden" name="action" value="spf_fiscal_batch_beta_submit">
+                                        <input type="hidden" name="batch_id" value="<?php echo esc_attr($batch['id']); ?>">
+                                        <button class="button button-primary" <?php disabled(!$batch_can_submit); ?>><?php esc_html_e('Enviar lote beta','sistema-para-farmacias'); ?></button>
+                                    </form>
+                                <?php endif; ?>
                             <?php else: ?>
                                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                                     <?php wp_nonce_field('spf_fiscal_batch_beta_poll'); ?>
@@ -199,7 +217,7 @@ $rows = $wpdb->get_results(
                 </tbody>
             </table>
         </div>
-        <p class="description"><?php esc_html_e('El transporte beta del lote es asíncrono: primero devuelve un ticket y después se consulta su estado. Producción continúa bloqueada.','sistema-para-farmacias'); ?></p>
+        <p class="description"><?php esc_html_e('Cada llamada remota exige primero una evidencia append-only. Si un ticket fue recibido pero no pudo asociarse al lote, la UI obliga a recuperarlo desde el ledger en vez de reenviar. Producción continúa bloqueada.','sistema-para-farmacias'); ?></p>
     </div>
 
     <div class="spf-panel">
