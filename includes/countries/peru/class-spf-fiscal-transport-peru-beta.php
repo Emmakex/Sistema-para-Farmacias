@@ -207,6 +207,9 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
         $result['remote_message'] = sanitize_text_field((string)($parsed['remote_message'] ?? ''));
         $result['notes'] = array_values((array)($parsed['notes'] ?? []));
         $result['cdr_xml_sha256'] = sanitize_text_field((string)($parsed['cdr_xml_sha256'] ?? ''));
+        $result['cdr_zip_bytes'] = $content;
+        $result['cdr_xml_bytes'] = (string)($parsed['cdr_xml_bytes'] ?? '');
+        $result['cdr_xml_name'] = sanitize_file_name((string)($parsed['cdr_xml_name'] ?? 'cdr.xml'));
         if ($code === '0') {
             $result['beta_status'] = ($parsed['beta_status'] ?? '') === 'beta_accepted_with_observation' ? 'beta_batch_accepted_with_observation' : (($parsed['beta_status'] ?? '') === 'beta_accepted' ? 'beta_batch_accepted' : 'beta_batch_rejected');
         } elseif ($code === '99') {
@@ -294,7 +297,11 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
         $zip = new ZipArchive();
         if ($zip->open($tmp) !== true) { @unlink($tmp); return new WP_Error('spf_beta_cdr_zip', __('La respuesta beta no contiene un ZIP CDR válido.', 'sistema-para-farmacias')); }
         $xml = '';
-        for ($i=0; $i<$zip->numFiles; $i++) { $name=$zip->getNameIndex($i); if (preg_match('/\.xml$/i',(string)$name)) { $xml=(string)$zip->getFromIndex($i); break; } }
+        $name = '';
+        for ($i=0; $i<$zip->numFiles; $i++) {
+            $candidate = (string)$zip->getNameIndex($i);
+            if (preg_match('/\.xml$/i', $candidate)) { $name=$candidate; $xml=(string)$zip->getFromIndex($i); break; }
+        }
         $zip->close(); @unlink($tmp);
         if ($xml === '') { return new WP_Error('spf_beta_cdr_xml', __('La CDR beta no contiene XML.', 'sistema-para-farmacias')); }
         $doc = new DOMDocument('1.0','UTF-8');
@@ -304,7 +311,15 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
         $message = trim((string)$xpath->evaluate('string(//cbc:Description[1])'));
         $notes = []; foreach ($xpath->query('//cbc:Note') as $note) { $text=trim((string)$note->textContent); if($text!==''){$notes[]=$text;} }
         $status = $code === '0' ? ($notes ? 'beta_accepted_with_observation' : 'beta_accepted') : 'beta_rejected';
-        return ['beta_status'=>$status,'remote_code'=>$code,'remote_message'=>$message,'notes'=>$notes,'cdr_xml_sha256'=>hash('sha256',$xml)];
+        return [
+            'beta_status'=>$status,
+            'remote_code'=>$code,
+            'remote_message'=>$message,
+            'notes'=>$notes,
+            'cdr_xml_sha256'=>hash('sha256',$xml),
+            'cdr_xml_name'=>sanitize_file_name($name ?: 'cdr.xml'),
+            'cdr_xml_bytes'=>$xml,
+        ];
     }
 
     private function valid_date($value) {
