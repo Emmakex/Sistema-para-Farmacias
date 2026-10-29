@@ -13,6 +13,7 @@ jobs:
       - name: PHP syntax
         run: |
           php -l includes/class-spf-fiscal-beta-readiness.php
+          php -l includes/countries/class-spf-country-peru.php
           php -l tests/fiscal-beta-readiness-smoke.php
           php -l sistema-para-farmacias.php
       - name: Readiness scope smoke
@@ -22,6 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           readiness='includes/class-spf-fiscal-beta-readiness.php'
+          country='includes/countries/class-spf-country-peru.php'
           main='sistema-para-farmacias.php'
           grep -Fq "Version: 0.21.0" "$main"
           grep -Fq "define('SPF_VERSION','0.21.0')" "$main"
@@ -31,6 +33,7 @@ jobs:
           grep -Fq "'runtime_dom'" "$readiness"
           grep -Fq "'runtime_zip'" "$readiness"
           grep -Fq "'runtime_soap'" "$readiness"
+          grep -Fq "'issuer_profile'" "$readiness"
           grep -Fq "'certificate'" "$readiness"
           grep -Fq "'invoice_xsd'" "$readiness"
           grep -Fq "'invoice_xsl'" "$readiness"
@@ -42,10 +45,23 @@ jobs:
           grep -Fq "'invoice_optin'" "$readiness"
           grep -Fq "'batch_optin'" "$readiness"
           grep -Fq "'production_guard'" "$readiness"
+          grep -Fq "SPF_Config::get('electronic_invoicing.readiness_profile'" "$readiness"
+          grep -Fq "'readiness_profile'" "$country"
+          grep -Fq "'required_fields'" "$country"
+          grep -Fq "'tax_id_pattern'" "$country"
           grep -Fq "SPF_Fiscal_Evidence_Manager::status" "$readiness"
           grep -Fq "SPF_Fiscal_Batch_Lifecycle::validation_resources" "$readiness"
           grep -Fq "SPF_Fiscal_Document_Remote_Event_Repository::table" "$readiness"
           grep -Fq "SPF_Fiscal_Batch_Remote_Event_Repository::table" "$readiness"
+      - name: Country policy stays in country pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          readiness='includes/class-spf-fiscal-beta-readiness.php'
+          if grep -En 'RUC|SUNAT|Yape|Plin|\bIGV\b|\bDNI\b|\\d\{11\}' "$readiness"; then
+            echo 'Country-specific readiness policy leaked into generic fiscal core'
+            exit 1
+          fi
       - name: Readiness remains local and secret-safe
         shell: bash
         run: |
