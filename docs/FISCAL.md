@@ -2,157 +2,113 @@
 
 ## Estado actual
 
-La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.16.0**.
+La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.17.0**.
 
-El sistema separa responsabilidades locales, beta y productivas para evitar que una prueba remota pueda convertirse accidentalmente en autoridad fiscal real.
+El diseño separa de forma estricta la preparación local, la evidencia beta y cualquier futura autoridad productiva. Una prueba remota nunca puede convertirse por sí sola en estado fiscal de producción.
 
 ## Capas
 
-1. **Core fiscal**: construye el contexto canónico de venta/comprobante y gobierna estados internos.
-2. **Adaptador de país**: aplica reglas territoriales y construye el XML correspondiente.
-3. **Firma**: aplica y verifica XMLDSig usando credenciales externas al repositorio y a la base de datos.
-4. **Validación local**: ejecuta XSD/XSL desde recursos externos al plugin.
-5. **Lotes fiscales**: congela snapshots inmutables para documentos que se transmiten agrupados.
+1. **Core fiscal**: contexto canónico de venta/comprobante y estados internos.
+2. **Adaptador de país**: reglas territoriales y XML fiscal.
+3. **Firma**: XMLDSig con credenciales externas al repositorio y a la base de datos.
+4. **Validación local**: XSD/XSL desde recursos externos.
+5. **Lotes fiscales**: snapshots inmutables para documentos agrupados.
 6. **Transporte local**: inspección y dry-run sin red.
-7. **Transporte beta**: pruebas remotas explícitas, aisladas y sin autoridad productiva.
-8. **Ledger remoto**: evidencia append-only de intenciones, tickets, consultas y hashes de respuestas.
-9. **Resultado fiscal productivo**: reservado para una fase futura y separada.
+7. **Transporte beta**: pruebas remotas explícitas y aisladas.
+8. **Ledger remoto**: eventos append-only de intenciones, tickets, consultas y hashes.
+9. **Readiness beta**: diagnóstico side-effect free y export de evidencia antes de una prueba real.
+10. **Producción**: fase futura, separada y todavía bloqueada.
 
 ## Estados independientes
 
-`internal_status` describe el flujo local.
+- `internal_status`: flujo local.
+- `signature_status`: firma local.
+- `validation_status`: validación local.
+- `transport_status`: transporte local/dry-run.
+- `beta_status`: evidencia del entorno de pruebas.
+- `fiscal_status`: reservado para tránsito o resultado fiscal real de producción.
 
-`signature_status` describe únicamente la firma local.
+**El beta no escribe `fiscal_status`.**
 
-`validation_status` describe únicamente la validación local.
+## Firma y validación
 
-`transport_status` describe el transporte local/dry-run.
-
-`beta_status` describe exclusivamente evidencia del entorno de pruebas.
-
-`fiscal_status` queda reservado para resultado o tránsito fiscal real de producción.
-
-**Una respuesta beta nunca modifica `fiscal_status`.**
-
-La columna histórica `sunat_status` se conserva temporalmente por compatibilidad con FarmaPOS, pero no es autoridad del nuevo diseño.
-
-## Firma local
-
-`SPF_Fiscal_XMLDSig_Signer` es el motor genérico de firma.
-
-La firma:
-
-- inserta los contenedores UBL necesarios;
-- firma mediante XMLDSig enveloped;
-- incrusta el certificado X.509 público;
-- verifica inmediatamente digest y firma;
-- rechaza certificados fuera de vigencia;
-- genera hashes SHA-256 de evidencia;
-- nunca persiste claves privadas ni contraseñas.
-
-Las credenciales se cargan mediante `SPF_Fiscal_Credentials_Environment` desde:
+`SPF_Fiscal_XMLDSig_Signer` firma y verifica localmente. Las credenciales se leen desde:
 
 - `SPF_FISCAL_P12_PATH`;
 - `SPF_FISCAL_P12_PASSWORD`.
 
-## Validación local
+No se persisten claves privadas ni contraseñas.
 
-`SPF_Fiscal_XSD_XSL_Validator` ejecuta validación local sin red.
+`SPF_Fiscal_XSD_XSL_Validator` valida sin red. Los recursos externos son:
 
-Para comprobantes individuales:
+### Comprobantes individuales
 
 - `SPF_FISCAL_XSD_PATH`;
 - `SPF_FISCAL_XSL_PATH`.
 
-Para Resumen Diario Perú:
+### Resumen Diario Perú
 
 - `SPF_FISCAL_PERU_SUMMARY_XSD_PATH`;
 - `SPF_FISCAL_PERU_SUMMARY_XSL_PATH`.
 
-`valid_local` requiere XSD y XSL configurados y válidos.
-
-Los recursos oficiales permanecen fuera del repositorio.
+`valid_local` requiere que XSD y XSL pasen para el XML firmado exacto.
 
 ## Lotes fiscales
 
-Los comprobantes con estrategia `daily_summary` se agrupan en lotes persistidos.
+Los documentos con estrategia `daily_summary` se congelan en lotes persistidos con:
 
-Cada lote conserva:
-
-- cabecera congelada;
-- miembros congelados;
-- SHA-256 por línea;
-- SHA-256 global del snapshot;
+- cabecera snapshot;
+- miembros snapshot;
+- SHA-256 por miembro;
+- SHA-256 global;
 - identificador y secuencia estables;
 - hash del XML reconstruido.
 
-La firma y validación del lote reconstruyen exclusivamente desde snapshots persistidos, no desde ventas o clientes actuales.
+Firma y validación reconstruyen exclusivamente desde esos snapshots, nunca desde ventas o clientes actuales.
 
 ## Perú · Resumen Diario
 
 El perfil Perú declara:
 
-- `boleta` → estrategia `daily_summary`;
+- `boleta` → `daily_summary`;
 - builder `peru_summary_documents`;
 - identificador `RC-YYYYMMDD-NNNNN`;
 - firma XMLDSig local;
-- validación XSD/XSL específica del lote;
+- XSD/XSL específicos;
 - transporte beta asíncrono `peru_beta`;
 - producción deshabilitada.
 
-El flujo local es:
+Flujo local:
 
 `snapshot → integridad → firma → validación`
 
-El flujo beta es:
+Flujo beta:
 
-`revalidación → submit intent → sendSummary → ticket → poll intent → getStatus → evidencia de respuesta`
+`revalidación → submit_intent → sendSummary → ticket_received → poll_intent → getStatus → poll_result`
 
-## Beta Perú · factura individual
+Las operaciones SOAP y el endpoint beta viven únicamente en el country pack Perú.
 
-Las facturas de prueba usan:
+## Opt-in beta
 
-- estrategia `single`;
-- código fiscal `01`;
-- `sendBill`;
-- CDR síncrona;
-- estado separado en `beta_status`.
-
-El beta individual requiere:
+### Factura individual
 
 ```php
 define('SPF_FISCAL_BETA_ENABLED', true);
 define('SPF_FISCAL_BETA_CONFIRMATION', 'SUNAT_TEST_ONLY');
 ```
 
-## Beta Perú · Resumen Diario
-
-El beta de lotes tiene opt-in independiente:
+### Resumen Diario
 
 ```php
 define('SPF_FISCAL_BETA_SUMMARY_ENABLED', true);
 define('SPF_FISCAL_BETA_SUMMARY_CONFIRMATION', 'SUNAT_SUMMARY_TEST_ONLY');
 ```
 
-Antes de `sendSummary` se exige:
-
-1. snapshot íntegro;
-2. firma reproducible y verificada;
-3. XSD/XSL local completo;
-4. igualdad entre hash firmado y hash validado;
-5. misma evidencia de certificado;
-6. fecha dentro de la ventana admitida por el perfil beta;
-7. advisory lock MySQL;
-8. cooldown;
-9. evento append-only `submit_intent`.
-
-`sendSummary` devuelve un ticket. `getStatus` consulta después ese ticket y distingue procesamiento en curso y resultados finalizados.
-
-El transporte beta de Perú es el único lugar donde existen las operaciones SOAP y el endpoint beta.
+Ambos flujos están bloqueados por defecto.
 
 ## Ledger remoto append-only
 
-`SPF_Fiscal_Batch_Remote_Event_Repository` conserva una cadena de evidencia separada del agregado `fiscal_batches`.
+`SPF_Fiscal_Batch_Remote_Event_Repository` registra evidencia separada de `fiscal_batches`.
 
 Eventos principales:
 
@@ -164,83 +120,136 @@ Eventos principales:
 - `poll_result`;
 - `ticket_recovered`.
 
-El ledger guarda hashes, ticket, códigos, mensajes y timestamps; no guarda XML/ZIP completos.
+El ledger guarda UUID, fingerprint criptográfico, ticket, códigos, hashes y timestamps. No guarda XML o ZIP completos.
 
-Cada evento queda unido a un fingerprint SHA-256 que incluye identidad del lote, snapshot, XML, firma, certificado, validación, transporte y entorno.
+El fingerprint incorpora identidad del lote, snapshot, XML, firma, certificado, validación, transporte y entorno.
 
-### Recuperación de ticket
+### Recuperación
 
-Si la autoridad devuelve un ticket y después falla la actualización de `fiscal_batches`, el ticket ya debe existir en `ticket_received`.
+Si existe `ticket_received` con el mismo fingerprint pero `remote_ticket` quedó vacío, el sistema permite **Recuperar ticket** sin red y prohíbe reenviar el lote.
 
-La acción `Recuperar ticket`:
+Mientras exista ticket asociado o recuperable, firma y validación quedan congeladas también server-side.
 
-- no permite escribir tickets manualmente;
-- solo acepta un evento previo del propio sistema;
-- exige fingerprint coincidente;
-- no realiza red;
-- asocia el ticket al lote;
-- añade `ticket_recovered`.
+## Readiness beta 0.17.0
 
-Mientras exista un ticket asociado **o recuperable**, la firma y validación local del lote quedan congeladas tanto en UI como server-side.
+`SPF_Fiscal_Batch_Beta_Diagnostics` añade una fase obligatoriamente local antes de una prueba real.
 
-## Concurrencia y carga
+El diagnóstico comprueba:
 
-Las operaciones beta de lote usan advisory lock MySQL (`GET_LOCK` / `RELEASE_LOCK`).
+- runtime PHP: DOM, OpenSSL, SOAP, XSL y ZIP;
+- integridad del snapshot;
+- evidencia de firma;
+- igualdad firma/validación;
+- XSD/XSL legibles;
+- revalidación actual del XML firmado en memoria;
+- inspección local del transporte;
+- doble opt-in;
+- ausencia de ticket asociado o recuperable para un primer envío.
 
-Además existen cooldowns separados para envío y consulta.
+No llama a `submit_batch()` ni a `poll_batch()` y devuelve explícitamente:
 
-El servicio beta debe utilizarse solo para pruebas controladas. No se utiliza para estrés, carga masiva ni comprobantes reales.
+`network_performed=false`
 
-## Límites de producción
+Estados de preparación:
+
+- `ready_for_submit`;
+- `ready_for_poll`;
+- `ready_for_recovery`.
+
+## Panel de preparación
+
+La pantalla Fiscal incorpora un panel independiente:
+
+**Preparación beta controlada · sin red**
+
+Permite:
+
+- ejecutar **Diagnóstico beta**;
+- ver las comprobaciones una a una;
+- consultar un timeline corto del ledger;
+- ejecutar **Exportar evidencia JSON**.
+
+## Export de evidencia
+
+El esquema exportado es:
+
+`spf-fiscal-beta-evidence-v1`
+
+Incluye:
+
+- identidad del lote;
+- hashes de snapshot/XML/firma/certificado/validación;
+- estados;
+- ticket;
+- diagnóstico;
+- timeline sanitizado;
+- `export_sha256`.
+
+No incluye:
+
+- `snapshot_body`;
+- `response_body`;
+- `metadata_body` crudo;
+- XML o ZIP completos;
+- claves privadas;
+- certificados PEM;
+- contraseña PKCS#12;
+- rutas privadas del servidor.
+
+## Concurrencia
+
+Las operaciones beta de lote utilizan advisory lock MySQL (`GET_LOCK` / `RELEASE_LOCK`) y cooldowns separados para envío y consulta.
+
+El ledger añade trazabilidad; no sustituye el lock.
+
+## Producción continúa bloqueada
 
 El código actual no habilita:
 
 - endpoint productivo;
 - credenciales SOL productivas;
-- promoción de estados beta a `fiscal_status`;
-- reintentos automáticos de envíos asíncronos;
-- polling automático mediante cron;
-- almacenamiento de XML/ZIP remotos como evidencia definitiva;
-- afirmación de compatibilidad productiva hasta completar pruebas y reconciliación formal.
+- promoción de beta a `fiscal_status`;
+- polling automático;
+- reintentos automáticos;
+- pruebas masivas o de carga;
+- afirmación de compatibilidad productiva sin evidencia real y reconciliación formal.
 
 ## CI
 
-CI verifica, entre otros:
+La matriz actual verifica:
 
 - sintaxis PHP;
-- firma XMLDSig y rechazo de manipulación;
-- validación XSD/XSL;
-- construcción `SummaryDocuments`;
-- persistencia e idempotencia del snapshot;
-- firma y validación del lote;
+- firma XMLDSig y manipulación;
+- XSD/XSL;
+- `SummaryDocuments`;
+- snapshots e idempotencia;
+- firma/validación del lote;
 - beta individual fail-closed;
 - beta de Resumen Diario fail-closed;
-- parsing de ticket y `getStatus`;
-- aislamiento de operaciones SOAP en el country pack Perú;
-- ausencia del endpoint productivo en PHP;
-- advisory lock y cooldown;
+- ticket/getStatus parsing;
+- aislamiento SOAP en Perú;
+- ausencia del endpoint productivo;
+- advisory lock/cooldown;
 - ausencia de escrituras beta a `fiscal_status`;
-- ledger remoto append-only;
-- orden de evidencia antes de cada llamada remota;
+- ledger append-only y orden de eventos;
 - recuperación de ticket sin red;
-- ausencia de cuerpos XML/ZIP en el ledger;
-- credenciales, certificados y paquetes XSD/XSL fuera del repositorio.
+- readiness positivo sin transporte remoto;
+- export sanitizado con SHA-256.
 
-## Referencias funcionales
+## Próximo paso
 
-La implementación se contrasta con documentación pública de SUNAT para:
+Tras certificar 0.17.0, la instalación queda preparada para **una única prueba beta real controlada**.
 
-- `sendBill`;
-- `sendSummary`;
-- `getStatus`;
-- credenciales y endpoint del servicio beta;
-- restricciones de uso del beta;
-- guías y recursos UBL/XSD/XSL.
+Secuencia operativa:
 
-## Próximo corte
+1. lote de prueba persistido;
+2. firma;
+3. validación;
+4. diagnóstico beta con `ready_for_submit=true` y `network_performed=false`;
+5. un único envío beta;
+6. ticket;
+7. consultas controladas hasta estado terminal;
+8. export JSON de evidencia;
+9. conservación y revisión del `export_sha256`.
 
-Tras certificar 0.16.0, el siguiente paso es ejecutar **una prueba beta real controlada** desde una instalación preparada y conservar la cadena completa:
-
-`submit_intent → ticket_received → poll_intent → poll_result`
-
-Esa evidencia servirá para reconciliar el comportamiento real del servicio vigente. Producción seguirá bloqueada hasta una fase posterior con credenciales productivas externas, estrategia formal de idempotencia/reintentos, observabilidad y reconciliación CDR.
+La prueba real debe ejecutarse desde una instalación WordPress preparada con certificado, XSD/XSL, extensiones PHP y acceso de red. Producción seguirá bloqueada después de esa prueba.
