@@ -12,6 +12,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: PHP syntax
         run: find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Fiscal XMLDSig smoke
+        run: php tests/fiscal-signature-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -33,11 +35,28 @@ jobs:
           violations="$(grep -RInE 'wp_remote_|curl_|SoapClient|sendBill|sendSummary|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' \
             --include='*.php' \
             includes/class-spf-fiscal-manager.php \
+            includes/class-spf-fiscal-signing-manager.php \
             includes/class-spf-fiscal-transport-manager.php \
             includes/fiscal \
             includes/countries/peru || true)"
           if [ -n "$violations" ]; then
-            echo "Real network transport found inside dry-run-only fiscal cut:"
+            echo "Real network transport found inside local-only fiscal cut:"
             echo "$violations"
+            exit 1
+          fi
+      - name: Fiscal credentials stay outside repository and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_files="$(find . -type f \( -iname '*.p12' -o -iname '*.pfx' -o -iname '*.pem' -o -iname '*.key' -o -iname '*.crt' \) -not -path './.git/*' -print)"
+          if [ -n "$credential_files" ]; then
+            echo "Credential-like files must not be committed:"
+            echo "$credential_files"
+            exit 1
+          fi
+          persistence="$(grep -RInE '(update_option|add_option|set_transient).*FISCAL_P12|response_body.*private_key|response_body.*P12_PASSWORD' --include='*.php' . || true)"
+          if [ -n "$persistence" ]; then
+            echo "Fiscal credential persistence detected:"
+            echo "$persistence"
             exit 1
           fi
