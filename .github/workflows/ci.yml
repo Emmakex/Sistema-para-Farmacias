@@ -60,7 +60,7 @@ jobs:
             echo "Production or asynchronous operations are forbidden in the invoice-only beta cut"
             exit 1
           fi
-          if grep -RIn 'e-factura\.sunat\.gob\.pe' --include='*.php' .; then
+          if grep -RInF 'e-factura.sunat.gob.pe' --include='*.php' .; then
             echo "Production fiscal endpoint must remain absent from PHP"
             exit 1
           fi
