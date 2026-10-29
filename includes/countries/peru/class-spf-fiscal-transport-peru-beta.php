@@ -111,6 +111,7 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
         $parsed['zip_name'] = $zip_name;
         $parsed['request_zip_sha256'] = hash('sha256', $zip_bytes);
         $parsed['cdr_zip_sha256'] = hash('sha256', $cdr);
+        $parsed['cdr_zip_bytes'] = $cdr;
         return $parsed;
     }
 

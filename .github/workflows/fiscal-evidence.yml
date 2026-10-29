@@ -17,17 +17,23 @@ jobs:
           php -l includes/fiscal/class-spf-fiscal-evidence-filesystem.php
           php -l includes/class-spf-fiscal-evidence-manager.php
           php -l includes/class-spf-fiscal-batch-beta-manager.php
+          php -l includes/class-spf-fiscal-transport-manager.php
           php -l includes/countries/peru/class-spf-fiscal-transport-peru-beta.php
           php -l tests/fiscal-evidence-archive-smoke.php
-      - name: Fiscal evidence archive smoke
+          php -l tests/fiscal-invoice-evidence-smoke.php
+      - name: Fiscal batch evidence archive smoke
         run: php tests/fiscal-evidence-archive-smoke.php
+      - name: Fiscal invoice evidence archive smoke
+        run: php tests/fiscal-invoice-evidence-smoke.php
       - name: Private archive invariants
         shell: bash
         run: |
           set -euo pipefail
           provider='includes/fiscal/class-spf-fiscal-evidence-filesystem.php'
           manager='includes/class-spf-fiscal-evidence-manager.php'
-          beta_manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          batch_manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          invoice_manager='includes/class-spf-fiscal-transport-manager.php'
+          transport='includes/countries/peru/class-spf-fiscal-transport-peru-beta.php'
           country='includes/countries/class-spf-country-peru.php'
           main='sistema-para-farmacias.php'
 
@@ -38,13 +44,22 @@ jobs:
           grep -Fq 'rename($tmp, $target)' "$provider"
           grep -Fq "'evidence_store'=>'external_filesystem'" "$country"
           grep -Fq 'SPF_Fiscal_Evidence_Store_Registry::register' "$main"
-          grep -Fq 'SPF_Fiscal_Evidence_Manager::archive_batch_cdr' "$beta_manager"
-          grep -Fq "'beta_batch_evidence_error'" "$beta_manager"
-          grep -Fq "record(\$batch_id, 'evidence_archived'" "$beta_manager"
-          grep -Fq "record(\$batch_id, 'evidence_error'" "$beta_manager"
+          grep -Fq 'archive_batch_cdr' "$manager"
+          grep -Fq 'archive_document_cdr' "$manager"
+          grep -Fq 'SPF_Fiscal_Evidence_Manager::archive_batch_cdr' "$batch_manager"
+          grep -Fq 'SPF_Fiscal_Evidence_Manager::archive_document_cdr' "$invoice_manager"
+          grep -Fq "'beta_batch_evidence_error'" "$batch_manager"
+          grep -Fq "'beta_evidence_error'" "$invoice_manager"
+          grep -Fq "record(\$batch_id, 'evidence_archived'" "$batch_manager"
+          grep -Fq "record(\$batch_id, 'evidence_error'" "$batch_manager"
+          grep -Fq "\$parsed['cdr_zip_bytes'] = \$cdr;" "$transport"
 
-          if grep -Fq 'cdr_zip_bytes' "$beta_manager" || grep -Fq 'cdr_xml_bytes' "$beta_manager"; then
-            echo 'Raw CDR bytes must never enter generic beta manager/database metadata'
+          if grep -Fq 'cdr_zip_bytes' "$batch_manager" || grep -Fq 'cdr_xml_bytes' "$batch_manager"; then
+            echo 'Raw CDR bytes must never enter generic batch manager/database metadata'
+            exit 1
+          fi
+          if grep -Fq 'cdr_zip_bytes' "$invoice_manager" || grep -Fq 'cdr_xml_bytes' "$invoice_manager"; then
+            echo 'Raw CDR bytes must never enter generic invoice manager/database metadata'
             exit 1
           fi
           if grep -RInE 'SoapClient|__soapCall|wp_remote_|curl_' --include='*evidence*.php' includes; then
@@ -55,7 +70,7 @@ jobs:
             echo 'Raw fiscal evidence must not be encoded for database persistence'
             exit 1
           fi
-      - name: Ledger ordering with physical archive
+      - name: Ledger ordering with physical batch archive
         shell: bash
         run: |
           set -euo pipefail
@@ -66,12 +81,23 @@ jobs:
           final_store_line="$(grep -n 'store_result(\$batch_id, \$status, \$result, false)' "$manager" | tail -1 | cut -d: -f1)"
           test -n "$poll_result_line" -a -n "$archive_call_line" -a "$poll_result_line" -lt "$archive_call_line"
           test -n "$archived_event_line" -a -n "$final_store_line" -a "$archived_event_line" -lt "$final_store_line"
+      - name: Synchronous invoice archive precedes final beta projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-transport-manager.php'
+          archive_line="$(grep -n 'archive_document_cdr(\$document_id, \$result)' "$manager" | head -1 | cut -d: -f1)"
+          final_store_line="$(grep -n 'store_beta_result(\$document_id, \$status, \$result)' "$manager" | tail -1 | cut -d: -f1)"
+          error_store_line="$(grep -n "store_beta_result(\$document_id, 'beta_evidence_error'" "$manager" | head -1 | cut -d: -f1)"
+          test -n "$archive_line" -a -n "$final_store_line" -a "$archive_line" -lt "$final_store_line"
+          test -n "$error_store_line"
       - name: Beta remains non-production
         shell: bash
         run: |
           set -euo pipefail
-          manager='includes/class-spf-fiscal-batch-beta-manager.php'
-          if grep -En "['\"]fiscal_status['\"]\s*=>" "$manager"; then
+          batch_manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          invoice_manager='includes/class-spf-fiscal-transport-manager.php'
+          if grep -En "['\"]fiscal_status['\"]\s*=>" "$batch_manager" "$invoice_manager"; then
             echo 'Evidence archive must never promote beta into fiscal_status'
             exit 1
           fi
