@@ -1,0 +1,67 @@
+name: Plugin Package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve and verify version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          header_version="$(php -r '$c=file_get_contents("sistema-para-farmacias.php"); preg_match("/Version:\\s*([0-9.]+)/",$c,$m); echo $m[1]??"";')"
+          constant_version="$(php -r '$c=file_get_contents("sistema-para-farmacias.php"); preg_match("/define\\(\x27SPF_VERSION\x27,\x27([^\x27]+)\x27\\)/",$c,$m); echo $m[1]??"";')"
+          test -n "$header_version"
+          test "$header_version" = "$constant_version"
+          echo "version=$header_version" >> "$GITHUB_OUTPUT"
+          echo "Plugin version: $header_version"
+
+      - name: Build clean installable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.meta.outputs.version }}'
+          rm -rf package
+          mkdir -p package/sistema-para-farmacias
+          rsync -a ./ package/sistema-para-farmacias/ \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='docs/' \
+            --exclude='tests/' \
+            --exclude='package/'
+
+          find package/sistema-para-farmacias -name '*.php' -print0 | xargs -0 -n1 php -l
+
+          cd package
+          zip -qr "sistema-para-farmacias-${version}.zip" sistema-para-farmacias
+          sha256sum "sistema-para-farmacias-${version}.zip" > "sistema-para-farmacias-${version}.sha256"
+
+      - name: Inspect package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.meta.outputs.version }}'
+          zipinfo -1 "package/sistema-para-farmacias-${version}.zip" | tee /tmp/package-files.txt
+          grep -Fxq 'sistema-para-farmacias/sistema-para-farmacias.php' /tmp/package-files.txt
+          if grep -Eq '^sistema-para-farmacias/(\.github|docs|tests)/' /tmp/package-files.txt; then
+            echo 'Development-only files leaked into installable package'
+            exit 1
+          fi
+
+      - name: Upload installable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sistema-para-farmacias-${{ steps.meta.outputs.version }}
+          path: |
+            package/sistema-para-farmacias-${{ steps.meta.outputs.version }}.zip
+            package/sistema-para-farmacias-${{ steps.meta.outputs.version }}.sha256
+          if-no-files-found: error
+          retention-days: 30
