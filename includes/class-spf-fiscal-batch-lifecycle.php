@@ -69,8 +69,8 @@ final class SPF_Fiscal_Batch_Lifecycle {
     public static function sign_batch($batch_id) {
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
         if (!$batch) { return new WP_Error('spf_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
-        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
-            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto y su evidencia local queda congelada.', 'sistema-para-farmacias'));
+        if (self::remote_locked($batch_id, $batch)) {
+            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto recibido o recuperable y su evidencia local queda congelada.', 'sistema-para-farmacias'));
         }
         $result = self::build_signed_payload($batch_id);
         if (is_wp_error($result)) { self::store_signature_error($batch_id, $result->get_error_message()); return $result; }
@@ -106,8 +106,8 @@ final class SPF_Fiscal_Batch_Lifecycle {
     public static function validate_batch($batch_id) {
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
         if (!$batch) { return new WP_Error('spf_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
-        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
-            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto y su evidencia local queda congelada.', 'sistema-para-farmacias'));
+        if (self::remote_locked($batch_id, $batch)) {
+            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto recibido o recuperable y su evidencia local queda congelada.', 'sistema-para-farmacias'));
         }
         if (sanitize_key((string)($batch['signature_status'] ?? '')) !== 'verified') {
             $error = new WP_Error('spf_batch_validation_unsigned', __('Firma y verifica localmente el lote antes de validarlo.', 'sistema-para-farmacias'));
@@ -155,11 +155,19 @@ final class SPF_Fiscal_Batch_Lifecycle {
         return $result;
     }
 
+    private static function remote_locked($batch_id, array $batch) {
+        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') { return true; }
+        if (class_exists('SPF_Fiscal_Batch_Beta_Manager')) {
+            return is_array(SPF_Fiscal_Batch_Beta_Manager::recoverable_ticket($batch_id));
+        }
+        return false;
+    }
+
     private static function store_signature_error($batch_id, $message) {
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch || trim((string)($batch['remote_ticket'] ?? '')) !== '') { return; }
+        if (!$batch || self::remote_locked($batch_id, $batch)) { return; }
         $metadata = self::metadata($batch['response_body'] ?? '');
         $metadata['local_signature'] = ['status'=>'signature_error','message'=>sanitize_text_field((string)$message),'verified_at'=>current_time('mysql')];
         unset($metadata['local_validation'], $metadata['fiscal_beta_batch']);
@@ -174,7 +182,7 @@ final class SPF_Fiscal_Batch_Lifecycle {
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch || trim((string)($batch['remote_ticket'] ?? '')) !== '') { return; }
+        if (!$batch || self::remote_locked($batch_id, $batch)) { return; }
         $metadata = self::metadata($batch['response_body'] ?? '');
         unset($metadata['fiscal_beta_batch']);
         $metadata['local_validation'] = [
