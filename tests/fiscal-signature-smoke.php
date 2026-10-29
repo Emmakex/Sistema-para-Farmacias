@@ -36,6 +36,7 @@ $xml = '<?xml version="1.0" encoding="UTF-8"?>'
     . '<cbc:ID>F001-00000001</cbc:ID>'
     . '<cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>'
     . '<cac:AccountingSupplierParty><cac:Party><cac:PartyTaxScheme><cbc:RegistrationName>CI EMISOR</cbc:RegistrationName></cac:PartyTaxScheme></cac:Party></cac:AccountingSupplierParty>'
+    . '<!--reference-comment-->'
     . '<cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="PEN">100.00</cbc:PayableAmount></cac:LegalMonetaryTotal>'
     . '</Invoice>';
 
@@ -57,6 +58,12 @@ if (strpos($result['xml'], '<ext:UBLExtensions') === false || strpos($result['xm
 
 $verified = $signer->verify($result['xml'], $profile);
 if (is_wp_error($verified) || empty($verified['ok'])) { fwrite(STDERR, "Independent verification failed\n"); exit(1); }
+
+$withoutReferenceComment = str_replace('<!--reference-comment-->', '', $result['xml']);
+$commentInvariant = $signer->verify($withoutReferenceComment, $profile);
+if (is_wp_error($commentInvariant) || empty($commentInvariant['ok'])) {
+    fwrite(STDERR, "Reference digest incorrectly depends on XML comments\n"); exit(1);
+}
 
 $tampered = str_replace('100.00', '101.00', $result['xml']);
 $tamperedResult = $signer->verify($tampered, $profile);
