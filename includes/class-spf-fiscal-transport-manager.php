@@ -39,10 +39,9 @@ final class SPF_Fiscal_Transport_Manager {
     }
 
     public static function build_package($document_id) {
-        $prepared = SPF_Fiscal_Manager::prepare_preview($document_id);
+        $prepared = SPF_Fiscal_Manager::build_preview($document_id);
         if (is_wp_error($prepared)) { return $prepared; }
-        $context = SPF_Fiscal_Manager::context($document_id);
-        if (is_wp_error($context)) { return $context; }
+        $context = $prepared['context'];
         $transport = self::active_transport();
         if (!$transport) { return new WP_Error('spf_transport_missing', __('No hay un transporte fiscal registrado.', 'sistema-para-farmacias')); }
 
@@ -78,6 +77,7 @@ final class SPF_Fiscal_Transport_Manager {
             'signed' => $signed,
             'signature_verified' => $signature_verified,
             'signature_error' => sanitize_text_field($signature_error),
+            'validation_status' => sanitize_key($context['document']['validation_status'] ?? 'not_validated'),
             'created_at' => current_time('mysql'),
         ];
     }
@@ -106,6 +106,7 @@ final class SPF_Fiscal_Transport_Manager {
             'signed' => !empty($package['signed']),
             'signature_verified' => !empty($package['signature_verified']),
             'signature_error' => $package['signature_error'],
+            'validation_status' => $package['validation_status'],
             'transmitted' => false,
             'ok' => !empty($result['ok']),
             'errors' => array_values((array) ($result['errors'] ?? [])),

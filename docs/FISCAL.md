@@ -2,19 +2,22 @@
 
 ## Principio
 
-Sistema para Farmacias separa cinco responsabilidades:
+Sistema para Farmacias separa seis responsabilidades:
 
 1. **Core fiscal**: obtiene el contexto canónico de venta/comprobante y gobierna estados internos.
 2. **Adaptador de país**: valida reglas territoriales y construye el formato fiscal correspondiente.
 3. **Firma**: aplica y verifica localmente XMLDSig usando credenciales externas al repositorio y a la base de datos.
-4. **Transporte**: empaqueta y ejecuta el mecanismo de entrega definido por cada sistema fiscal.
-5. **Resultado fiscal**: reconcilia únicamente respuestas reales de autoridad/PSE/OSE.
+4. **Validación local**: ejecuta XSD/XSL desde recursos oficiales locales externos al plugin.
+5. **Transporte**: empaqueta y ejecuta el mecanismo de entrega definido por cada sistema fiscal.
+6. **Resultado fiscal**: reconcilia únicamente respuestas reales de autoridad/PSE/OSE.
 
 ## Estados independientes
 
 `internal_status` describe nuestro flujo local (`draft`, `ready`, `prepared`, etc.).
 
 `signature_status` describe únicamente la firma local (`not_signed`, `verified`, `signature_error`).
+
+`validation_status` describe únicamente la validación local (`not_validated`, `valid_local`, `partial`, `resources_missing`, `validation_error`).
 
 `transport_status` describe el estado técnico del paquete (`not_prepared`, `dry_run_validated`, `blocked_unsigned`, `submitted`, `response_received`, `transport_error`).
 
@@ -26,7 +29,7 @@ La columna histórica `sunat_status` se conserva temporalmente por compatibilida
 
 `SPF_Fiscal_Manager` construye un contexto a partir de comprobante, venta, cliente, líneas, perfil del país e identidad fiscal del emisor.
 
-El adaptador devuelve errores y advertencias. Solo sin errores se genera un XML de previsualización. Ese XML no se envía, no se guarda como comprobante fiscal definitivo y nunca cambia por sí mismo el estado fiscal a aceptado/rechazado.
+El adaptador devuelve errores y advertencias. Solo sin errores se genera un XML de previsualización. La construcción pura (`build_preview`) no modifica estado; la acción explícita de preflight (`prepare_preview`) sí registra evidencia e invalida firma/validación/transportes anteriores.
 
 ## Firma local
 
@@ -45,7 +48,24 @@ La firma:
 
 El proveedor `SPF_Fiscal_Credentials_Environment` carga un PKCS#12 desde `SPF_FISCAL_P12_PATH` y `SPF_FISCAL_P12_PASSWORD`, definidos en entorno seguro o `wp-config.php`. La clave privada y la contraseña nunca se guardan en opciones, transients, logs ni `response_body`.
 
-CI genera en cada ejecución un certificado RSA efímero, firma un UBL mínimo, verifica la firma y comprueba que una alteración posterior del XML invalida el digest.
+`build_signed_payload()` es side-effect free: validar o ejecutar dry-run puede reconstruir la firma sin alterar estados persistidos. `sign_document()` es la operación explícita que registra evidencia de firma y reinicia cualquier validación/transportes posteriores.
+
+## Validación XSD/XSL local
+
+`SPF_Fiscal_Validator_Interface` desacopla la validación normativa del país y del transporte. La primera implementación es `SPF_Fiscal_XSD_XSL_Validator`.
+
+Los recursos no se incluyen en el plugin. Se configuran mediante:
+
+- `SPF_FISCAL_XSD_PATH`;
+- `SPF_FISCAL_XSL_PATH`.
+
+Las rutas pueden definirse como constantes o variables de entorno y pueden adaptarse mediante filtros WordPress. Solo se aceptan archivos locales legibles; rutas HTTP/HTTPS u otros esquemas remotos son rechazados.
+
+La validación XML usa `LIBXML_NONET`. La transformación XSLT bloquea escritura de archivos/directorios y lectura/escritura de red mediante las preferencias de seguridad disponibles en PHP. Esto permite usar un paquete oficial extraído localmente, incluyendo sus `xsl:include` relativos, sin permitir que las reglas contacten servicios externos.
+
+El estado `valid_local` solo se alcanza cuando tanto XSD como XSL están configurados y ambos pasan. Si solo una de las dos capas está disponible y pasa, el resultado es `partial`. Ninguno de esos estados implica aceptación por la autoridad fiscal.
+
+CI crea XSD/XSL efímeros y comprueba cuatro casos: documento válido, rechazo XSD, rechazo XSL y rechazo de recursos remotos. Otro guard impide versionar archivos `.xsd`, `.xsl` o `.xslt` en el repositorio.
 
 ## Política criptográfica
 
@@ -58,11 +78,11 @@ El perfil inicial de Perú usa RSA-SHA256/SHA-256 para validación local. Su ace
 
 ## Contrato de transporte
 
-`SPF_Fiscal_Transport_Interface` separa el transporte de la construcción y firma del documento. Un transporte declara código, entorno, capacidades, inspección de paquete y transmisión.
+`SPF_Fiscal_Transport_Interface` separa el transporte de la construcción, firma y validación del documento. El primer transporte es `SPF_Fiscal_Transport_Dry_Run`.
 
-El primer transporte es `SPF_Fiscal_Transport_Dry_Run`. Puede inspeccionar el paquete, estrategia, nombre, hash y estado de firma, pero su método `transmit()` devuelve siempre un error deliberado. No contiene URL, credencial ni cliente HTTP/SOAP.
+El dry-run puede inspeccionar el paquete, estrategia, nombre, hash y estado de firma, pero su método `transmit()` devuelve siempre un error deliberado. No contiene URL, credencial ni cliente HTTP/SOAP. `fiscal_status` continúa obligatoriamente en `not_sent`.
 
-`SPF_Fiscal_Transport_Manager` intenta construir un paquete firmado localmente. Si no hay certificado disponible conserva el comportamiento fail-closed `blocked_unsigned`. Si la firma local está verificada, el dry-run puede quedar `dry_run_validated`, pero `fiscal_status` continúa obligatoriamente en `not_sent`.
+La generación de paquete también es side-effect free: reconstruye preview/firma en memoria y conserva cualquier `validation_status` ya persistido.
 
 ## Perú
 
@@ -75,23 +95,27 @@ El perfil Perú declara:
 - firmador `xmldsig`;
 - credenciales `environment_p12`;
 - firma local `rsa_sha256`;
-- digest local `sha256`.
-
-Esta separación responde al flujo publicado para SEE-Contribuyente: la factura puede enviarse individualmente mientras las boletas se informan mediante resumen diario.
+- digest local `sha256`;
+- validador `xsd_xsl_local`;
+- recursos normativos `external_official_pack`;
+- parámetro XSL de nombre de archivo `nombreArchivoEnviado`.
 
 La documentación oficial consultada incluye:
 
 - SUNAT, **Guías y Manuales**: reglas de validación CPE actualizadas al 26/08/2026.
 - SUNAT, **Archivo XSL 2.1** publicado en la sección oficial de validadores.
-- SUNAT, **Guía de elaboración de documentos electrónicos XML - UBL 2.1**: XMLDSig obligatorio, certificado X.509 válido, firma del documento completo y prohibición de modificarlo después de firmar.
-- SUNAT, **SEE del Contribuyente**: CDR aceptada, aceptada con observación y rechazada; factura y resumen diario de boletas.
-- SUNAT, **Servicios Web disponibles** y servicio beta de pruebas.
+- SUNAT, **Archivo XSD 2.1** publicado en la sección oficial de validadores.
+- SUNAT, **Guía de elaboración de documentos electrónicos XML - UBL 2.1**.
+- SUNAT, **SEE del Contribuyente**, **Servicios Web disponibles** y servicio beta de pruebas.
 - SUNAT, **Certificado Digital**.
+
+Los XSD/XSL oficiales evolucionan fuera del ciclo de releases del plugin; por eso se mantienen como recursos externos verificables y reemplazables sin publicar una nueva versión del producto.
 
 ## Bloqueos actuales
 
-La versión 0.9.0 no incluye:
+La versión 0.10.0 no incluye:
 
+- XSD/XSL oficiales dentro del repositorio;
 - certificado o llave privada dentro del repositorio;
 - certificado o contraseña dentro de la base de datos;
 - ZIP fiscal definitivo;
@@ -100,10 +124,11 @@ La versión 0.9.0 no incluye:
 - URL beta o producción en PHP;
 - `SendBill`, `SendSummary` o `GetStatus`;
 - CDR real;
+- validación remota;
 - afirmación de compatibilidad remota de RSA-SHA256 hasta probarla contra el servicio/reglas vigentes.
 
-CI falla si se introduce código de red, endpoints oficiales o ficheros de credenciales dentro de este corte.
+CI falla si se introduce código de red, endpoints oficiales, credenciales o paquetes XSD/XSL dentro de este corte.
 
 ## Próximo corte
 
-El siguiente bloque deberá añadir validación XSD/XSL local y una matriz de conformidad territorial. Solo después se habilitará un transporte beta controlado. Producción seguirá bloqueada hasta disponer de evidencia de aceptación controlada y reconciliación CDR.
+El siguiente bloque será una **matriz de conformidad beta** y un transporte beta controlado, todavía fail-closed para producción. Antes de cualquier transmisión se deberá exigir: firma verificada, validación local completa, credenciales de pruebas externas y evidencia explícita de que el documento pertenece al entorno de pruebas. Producción seguirá bloqueada hasta obtener y reconciliar una respuesta fiscal controlada.
