@@ -1,24 +1,16 @@
 # Ledger remoto append-only para comprobantes síncronos
 
-Versión objetivo: **0.19.0**.
+Versión objetivo: **0.20.0**.
 
 ## Problema que resuelve
 
 Una factura beta usa un transporte síncrono: se envía el XML firmado y la autoridad devuelve la CDR dentro de la misma operación.
 
-Sin un ledger previo a la proyección de WordPress existe un fallo peligroso:
-
-1. la autoridad recibe y responde;
-2. la CDR se archiva correctamente;
-3. WordPress falla al actualizar `beta_status` / `response_body`;
-4. el operador vuelve a pulsar enviar;
-5. el mismo XML podría transmitirse de nuevo.
-
-La tabla principal del comprobante es una **proyección mutable**. No puede ser la única evidencia de una operación remota.
+La tabla principal del comprobante es una **proyección mutable**. Si la autoridad respondió y el archivo CDR quedó preservado, una escritura local fallida nunca debe provocar un segundo envío del mismo XML.
 
 ## Ledger
 
-Se añade una tabla independiente:
+La tabla independiente es:
 
 ```text
 farmapos_fiscal_document_remote_events
@@ -26,26 +18,23 @@ farmapos_fiscal_document_remote_events
 
 Los eventos son append-only. El repositorio no contiene `UPDATE` ni `DELETE`.
 
-Cada evento queda vinculado a:
+Cada evento puede conservar:
 
 - `document_id`;
 - operación;
-- transporte;
-- entorno;
-- SHA-256 de evidencia;
-- SHA-256 del XML enviado;
-- SHA-256 del ZIP enviado cuando existe;
-- SHA-256 del ZIP CDR;
-- SHA-256 del XML CDR;
-- código/mensaje remoto normalizados;
+- transporte y entorno;
+- fingerprint SHA-256;
+- SHA-256 del XML/ZIP enviados;
+- SHA-256 del ZIP/XML CDR;
+- código y mensaje remoto normalizados;
 - metadata saneada;
-- fecha.
+- timestamp.
 
 Nunca se guardan XML/ZIP crudos en el ledger.
 
 ## Binding criptográfico
 
-`evidence_sha256` se construye con la identidad del comprobante y el payload exacto:
+`evidence_sha256` se construye con:
 
 ```text
 document_id
@@ -61,7 +50,9 @@ transport
 environment
 ```
 
-Cambiar XML firmado, certificado, validación o documento genera otra identidad remota.
+Cambiar XML firmado, certificado, validación, documento, transporte o entorno genera otra identidad remota.
+
+Desde 0.20.0 el mismo cálculo puede ejecutarse también sobre una fila ya cargada mediante `evidence_sha256_from_row()`. Esto permite detectar candidatos operativos sin reconstruir firma/validación para cada fila del panel administrativo.
 
 ## Orden obligatorio
 
@@ -99,39 +90,62 @@ Una respuesta ya registrada para la misma evidencia **bloquea el reenvío**.
 
 ## Recuperación de proyección
 
-Si `evidence_archived` existe pero falla la escritura de la tabla de comprobantes, la respuesta remota no se pierde.
-
 `recover_beta_invoice()`:
 
 1. reconstruye y valida otra vez el XML actual;
 2. calcula la misma `evidence_sha256`;
-3. busca el último `evidence_archived` para esa identidad;
-4. reconstruye solo los metadatos saneados;
-5. actualiza `beta_status` / `response_body` sin tocar red;
+3. exige un `evidence_archived` coincidente;
+4. reconstruye solo metadatos saneados;
+5. actualiza `beta_status` / `response_body` sin red;
 6. añade `projection_recovered` al ledger.
 
 La recuperación no transmite el comprobante de nuevo.
 
+## UI operativa 0.20.0
+
+`SPF_Fiscal_Document_Recovery_UI` muestra en la pantalla **Fiscal** únicamente desalineaciones recuperables:
+
+- existe `evidence_archived`;
+- el fingerprint archivado coincide con la firma, certificado y validación actualmente persistidos;
+- el `beta_status` local no coincide con el resultado archivado.
+
+La detección usa `recovery_candidates()` y una consulta agrupada; no ejecuta `build_package()`, firma ni validación completa por cada fila.
+
+El panel muestra:
+
+- comprobante;
+- estado beta archivado;
+- estado beta local;
+- prefijo del fingerprint;
+- código remoto;
+- fecha de archivo;
+- acción **Recuperar desde ledger**.
+
+La acción está protegida por nonce y permisos. Al pulsarla, la comprobación server-side completa vuelve a ejecutar `recoverable_beta_invoice()` antes de modificar nada.
+
+Por tanto, el panel es una **ayuda operativa**, no una nueva autoridad de integridad.
+
 ## Situación no recuperable automáticamente
 
-Si existe `response_received` pero no existe `evidence_archived`, el sistema bloquea un nuevo envío.
+Si existe `response_received` pero no existe `evidence_archived`, el sistema bloquea un nuevo envío y no muestra recuperación segura.
 
-Esto significa que la autoridad respondió pero la cadena de conservación quedó incompleta. Se requiere revisión técnica; el sistema no puede asumir que reenviar sea seguro.
+La autoridad respondió pero la cadena de conservación quedó incompleta. Se requiere reconciliación técnica; el sistema no puede asumir que reenviar sea seguro.
 
 ## Seguridad
 
 - ledger append-only;
-- sin cuerpos CDR/XML;
-- sin red dentro del repositorio de eventos;
-- sin literales de proveedor/autoridad en el core;
+- sin cuerpos CDR/XML en base de datos;
+- Evidence Store privado como autoridad de bytes;
+- UI sin acceso directo a `$wpdb`;
+- detección UI sin red ni reconstrucción criptográfica N+1;
+- recuperación final con validación server-side;
 - beta no escribe `fiscal_status`;
-- endpoint productivo continúa ausente;
-- el Evidence Store privado sigue siendo la autoridad para los bytes fiscales.
+- endpoint productivo continúa ausente.
 
 ## Fuera de alcance
 
 - producción;
 - retry automático de operaciones remotas inciertas;
-- UI específica para explorar todos los eventos del documento;
+- explorador completo de todos los eventos del documento;
 - reconciliación automática de un `response_received` sin CDR archivada;
-- replicación/backup del ledger o evidence store.
+- replicación/backup del ledger o Evidence Store.
