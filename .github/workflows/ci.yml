@@ -100,13 +100,20 @@ jobs:
           grep -Fq "ROLLBACK" "$repo"
           grep -Fq "RELEASE_LOCK" "$repo"
           grep -Fq "snapshot_sha256" "$repo"
+          grep -Fq "'snapshot_body'=>" "$repo"
           grep -Fq "NOT EXISTS" "$manager"
           grep -Fq "condition_code='1'" "$manager"
           grep -Fq 'CREATE TABLE $batches' "$activator"
           grep -Fq 'CREATE TABLE $batch_items' "$activator"
+          grep -Fq 'UNIQUE KEY batch_identifier' "$activator"
           grep -Fq 'UNIQUE KEY batch_sequence' "$activator"
           grep -Fq 'UNIQUE KEY batch_snapshot' "$activator"
           grep -Fq 'UNIQUE KEY batch_document' "$activator"
+          snapshot_columns="$(grep -Fc 'snapshot_body LONGTEXT NOT NULL' "$activator")"
+          if [ "$snapshot_columns" -lt 2 ]; then
+            echo "Batch and batch-item snapshot bodies must both be persisted"
+            exit 1
+          fi
           if grep -RInE "__soapCall|sendSummary|getStatus" --include='*batch*.php' includes; then
             echo "Persistent batch layer must remain network-free"
             exit 1
