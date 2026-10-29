@@ -31,13 +31,18 @@ final class SPF_Fiscal_Manager {
         return ['adapter'=>$adapter,'context'=>$context,'errors'=>array_values(array_filter((array)($validation['errors']??[]))),'warnings'=>array_values(array_filter((array)($validation['warnings']??[])))];
     }
 
-    public static function prepare_preview($document_id) {
+    public static function build_preview($document_id) {
         $preflight=self::preflight($document_id);if(is_wp_error($preflight)){return $preflight;}if($preflight['errors']){return new WP_Error('spf_fiscal_preflight_failed',implode(' ',$preflight['errors']));}
         $xml=$preflight['adapter']->build_preview_xml($preflight['context']);if(is_wp_error($xml)){return $xml;}$xml=(string)$xml;if($xml===''){return new WP_Error('spf_fiscal_preview_empty',__('El adaptador no pudo generar la previsualización XML.','sistema-para-farmacias'));}
-        global $wpdb;$now=current_time('mysql');$metadata=['mode'=>'preview_only','signed'=>false,'sent'=>false,'adapter'=>$preflight['adapter']->code(),'country'=>$preflight['context']['country_code'],'ubl_sha256'=>hash('sha256',$xml),'warnings'=>$preflight['warnings'],'prepared_at'=>$now,'message'=>__('XML preliminar generado. No está firmado ni ha sido enviado a la autoridad fiscal.','sistema-para-farmacias')];
-        $updated=$wpdb->update(SPF_Database::table('invoices'),['internal_status'=>'prepared','sunat_status'=>'prepared','signature_status'=>'not_signed','signature_method'=>'','signature_certificate_sha256'=>'','signature_xml_sha256'=>'','validation_status'=>'not_validated','transport_status'=>'not_prepared','fiscal_status'=>'not_sent','fiscal_adapter'=>sanitize_key($preflight['adapter']->code()),'response_body'=>wp_json_encode($metadata,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),'updated_at'=>$now],['id'=>absint($document_id)]);
+        return ['xml'=>$xml,'sha256'=>hash('sha256',$xml),'warnings'=>$preflight['warnings'],'adapter'=>$preflight['adapter']->code(),'context'=>$preflight['context']];
+    }
+
+    public static function prepare_preview($document_id) {
+        $preview=self::build_preview($document_id);if(is_wp_error($preview)){return $preview;}
+        global $wpdb;$now=current_time('mysql');$metadata=['mode'=>'preview_only','signed'=>false,'sent'=>false,'adapter'=>$preview['adapter'],'country'=>$preview['context']['country_code'],'ubl_sha256'=>$preview['sha256'],'warnings'=>$preview['warnings'],'prepared_at'=>$now,'message'=>__('XML preliminar generado. No está firmado ni ha sido enviado a la autoridad fiscal.','sistema-para-farmacias')];
+        $updated=$wpdb->update(SPF_Database::table('invoices'),['internal_status'=>'prepared','sunat_status'=>'prepared','signature_status'=>'not_signed','signature_method'=>'','signature_certificate_sha256'=>'','signature_xml_sha256'=>'','validation_status'=>'not_validated','transport_status'=>'not_prepared','fiscal_status'=>'not_sent','fiscal_adapter'=>sanitize_key($preview['adapter']),'response_body'=>wp_json_encode($metadata,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),'updated_at'=>$now],['id'=>absint($document_id)]);
         if($updated===false){return new WP_Error('spf_fiscal_prepare_store',__('No se pudo guardar el resultado del preflight.','sistema-para-farmacias'));}
-        return ['xml'=>$xml,'sha256'=>$metadata['ubl_sha256'],'warnings'=>$preflight['warnings'],'adapter'=>$metadata['adapter']];
+        return $preview;
     }
 
     public function handle_prepare() {
