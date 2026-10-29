@@ -3,6 +3,8 @@ if (!defined('ABSPATH')) { exit; }
 
 final class SPF_Fiscal_Transport_Manager {
     const NOTICE_PREFIX = 'spf_transport_notice_';
+    const BETA_LOCK = 'spf_fiscal_beta_lock';
+    const BETA_COOLDOWN = 'spf_fiscal_beta_cooldown';
 
     public function hooks() {
         add_action('admin_post_spf_fiscal_transport_dry_run', [$this, 'handle_dry_run']);
@@ -141,20 +143,54 @@ final class SPF_Fiscal_Transport_Manager {
     }
 
     public static function beta_invoice($document_id) {
+        if (get_transient(self::BETA_LOCK)) {
+            return new WP_Error('spf_beta_busy', __('Ya hay una prueba beta en curso en esta instalación.', 'sistema-para-farmacias'));
+        }
+        if (get_transient(self::BETA_COOLDOWN)) {
+            return new WP_Error('spf_beta_cooldown', __('Espera unos segundos antes de ejecutar otra prueba beta.', 'sistema-para-farmacias'));
+        }
+
         $transport = SPF_Fiscal_Transport_Registry::get('peru_beta');
         if (!$transport) { return new WP_Error('spf_beta_transport_missing', __('El transporte beta Perú no está registrado.', 'sistema-para-farmacias')); }
         $package = self::build_package($document_id);
         if (is_wp_error($package)) { return $package; }
+        if (empty($package['signature_verified'])) {
+            return new WP_Error('spf_beta_signature_required', __('La factura debe tener una firma XMLDSig verificada antes de probar el beta.', 'sistema-para-farmacias'));
+        }
+
+        $validation = SPF_Fiscal_Validation_Manager::validate_signed_payload($document_id, [
+            'xml' => $package['xml'],
+            'verified' => true,
+            'signed_xml_sha256' => $package['xml_sha256'],
+        ]);
+        if (is_wp_error($validation)) { return $validation; }
+        if (($validation['validation_status'] ?? '') !== 'valid_local') {
+            return new WP_Error('spf_beta_validation_required', __('El XML firmado exacto debe superar XSD y XSL antes del envío beta.', 'sistema-para-farmacias'));
+        }
+        $package['validation_status'] = 'valid_local';
+        $package['validation_xml_sha256'] = sanitize_text_field((string)($validation['signed_xml_sha256'] ?? $package['xml_sha256']));
+
         $inspection = $transport->inspect($package);
         if (is_wp_error($inspection)) { return $inspection; }
         if (empty($inspection['ok'])) { return new WP_Error('spf_beta_inspection_failed', implode(' ', (array)($inspection['errors'] ?? []))); }
-        $result = $transport->transmit($package);
+
+        set_transient(self::BETA_LOCK, 1, MINUTE_IN_SECONDS);
+        set_transient(self::BETA_COOLDOWN, 1, 15);
+        try {
+            $result = $transport->transmit($package);
+        } finally {
+            delete_transient(self::BETA_LOCK);
+        }
         if (is_wp_error($result)) {
-            self::store_beta_result($document_id, 'beta_transport_error', ['error'=>$result->get_error_message()]);
+            self::store_beta_result($document_id, 'beta_transport_error', [
+                'error'=>$result->get_error_message(),
+                'validation_xml_sha256'=>$package['validation_xml_sha256'],
+            ]);
             return $result;
         }
         $status = sanitize_key((string)($result['beta_status'] ?? 'beta_transport_error'));
         if (!array_key_exists($status, self::beta_statuses())) { $status = 'beta_transport_error'; }
+        $result['validation_xml_sha256'] = $package['validation_xml_sha256'];
         self::store_beta_result($document_id, $status, $result);
         return $result;
     }
@@ -172,11 +208,16 @@ final class SPF_Fiscal_Transport_Manager {
             'request_zip_sha256'=>sanitize_text_field((string)($result['request_zip_sha256'] ?? '')),
             'cdr_zip_sha256'=>sanitize_text_field((string)($result['cdr_zip_sha256'] ?? '')),
             'cdr_xml_sha256'=>sanitize_text_field((string)($result['cdr_xml_sha256'] ?? '')),
+            'validation_xml_sha256'=>sanitize_text_field((string)($result['validation_xml_sha256'] ?? '')),
             'environment'=>'beta',
             'production'=>false,
             'tested_at'=>current_time('mysql'),
         ];
-        $wpdb->update($table, ['beta_status'=>sanitize_key($status),'response_body'=>wp_json_encode($metadata,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),'updated_at'=>current_time('mysql')], ['id'=>absint($document_id)]);
+        $wpdb->update($table, [
+            'beta_status'=>sanitize_key($status),
+            'response_body'=>wp_json_encode($metadata,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+            'updated_at'=>current_time('mysql')
+        ], ['id'=>absint($document_id)]);
     }
 
     public function handle_dry_run() {
