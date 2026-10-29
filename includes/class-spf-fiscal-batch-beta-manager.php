@@ -21,6 +21,7 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             'beta_batch_accepted'=>__('Lote aceptado en beta','sistema-para-farmacias'),
             'beta_batch_accepted_with_observation'=>__('Lote beta con observaciones','sistema-para-farmacias'),
             'beta_batch_rejected'=>__('Lote rechazado en beta','sistema-para-farmacias'),
+            'beta_batch_evidence_error'=>__('Error de conservación de evidencia','sistema-para-farmacias'),
             'beta_batch_transport_error'=>__('Error de transporte beta','sistema-para-farmacias'),
         ];
     }
@@ -238,6 +239,7 @@ final class SPF_Fiscal_Batch_Beta_Manager {
                 self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message(),'ticket'=>$ticket], false);
                 return $result;
             }
+
             $status = self::normalize_status($result['beta_status'] ?? '');
             $poll_event = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'poll_result', $evidence, [
                 'transport'=>$transport->code(),
@@ -254,6 +256,55 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             if (is_wp_error($poll_event)) {
                 return new WP_Error('spf_beta_batch_poll_ledger', __('La consulta remota respondió, pero no pudo preservarse en el ledger append-only. El lote no se actualizará con ese resultado.', 'sistema-para-farmacias'));
             }
+
+            if (self::is_final_status($status)) {
+                $archive = SPF_Fiscal_Evidence_Manager::archive_batch_cdr($batch_id, $result);
+                if (is_wp_error($archive)) {
+                    SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'evidence_error', $evidence, [
+                        'transport'=>$transport->code(),
+                        'environment'=>$transport->environment(),
+                        'ticket'=>$ticket,
+                        'beta_status'=>'beta_batch_evidence_error',
+                        'status_code'=>$result['status_code'] ?? '',
+                        'response_zip_sha256'=>$result['response_zip_sha256'] ?? '',
+                        'cdr_xml_sha256'=>$result['cdr_xml_sha256'] ?? '',
+                        'remote_code'=>$result['remote_code'] ?? '',
+                        'remote_message'=>$result['remote_message'] ?? '',
+                        'metadata'=>[
+                            'remote_outcome_status'=>$status,
+                            'evidence_error'=>$archive->get_error_message(),
+                        ],
+                    ]);
+                    $failed = $result;
+                    $failed['remote_outcome_status'] = $status;
+                    $failed['evidence_error'] = $archive->get_error_message();
+                    self::store_result($batch_id, 'beta_batch_evidence_error', $failed, false);
+                    return new WP_Error('spf_beta_batch_evidence_archive', sprintf(__('La autoridad beta respondió, pero la CDR no pudo conservarse de forma verificable: %s', 'sistema-para-farmacias'), $archive->get_error_message()));
+                }
+                $archive_metadata = self::sanitize_archive($archive);
+                $archive_event = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'evidence_archived', $evidence, [
+                    'transport'=>$transport->code(),
+                    'environment'=>$transport->environment(),
+                    'ticket'=>$ticket,
+                    'beta_status'=>$status,
+                    'status_code'=>$result['status_code'] ?? '',
+                    'response_zip_sha256'=>$result['response_zip_sha256'] ?? '',
+                    'cdr_xml_sha256'=>$result['cdr_xml_sha256'] ?? '',
+                    'remote_code'=>$result['remote_code'] ?? '',
+                    'remote_message'=>$result['remote_message'] ?? '',
+                    'metadata'=>$archive_metadata,
+                ]);
+                if (is_wp_error($archive_event)) {
+                    $failed = $result;
+                    $failed['remote_outcome_status'] = $status;
+                    $failed['evidence_archive'] = $archive;
+                    $failed['evidence_error'] = $archive_event->get_error_message();
+                    self::store_result($batch_id, 'beta_batch_evidence_error', $failed, false);
+                    return new WP_Error('spf_beta_batch_evidence_ledger', __('La CDR fue archivada, pero no pudo registrarse la evidencia append-only del archivo. El resultado beta no se marcará como final.', 'sistema-para-farmacias'));
+                }
+                $result['evidence_archive'] = $archive;
+            }
+
             if (!self::store_result($batch_id, $status, $result, false)) {
                 return new WP_Error('spf_beta_batch_status_store', __('La consulta beta quedó preservada en el ledger, pero no pudo reflejarse en el lote principal.', 'sistema-para-farmacias'));
             }
@@ -322,6 +373,31 @@ final class SPF_Fiscal_Batch_Beta_Manager {
         return array_key_exists($status, self::statuses()) ? $status : 'beta_batch_transport_error';
     }
 
+    private static function is_final_status($status) {
+        return in_array(sanitize_key((string)$status), [
+            'beta_batch_accepted',
+            'beta_batch_accepted_with_observation',
+            'beta_batch_rejected',
+        ], true);
+    }
+
+    private static function sanitize_archive(array $archive) {
+        $clean = [
+            'store'=>sanitize_key((string)($archive['store'] ?? '')),
+            'status'=>sanitize_key((string)($archive['status'] ?? '')),
+            'archived_at'=>sanitize_text_field((string)($archive['archived_at'] ?? '')),
+        ];
+        foreach (['cdr_zip','cdr_xml','manifest'] as $key) {
+            $record = is_array($archive[$key] ?? null) ? $archive[$key] : [];
+            $clean[$key] = [
+                'locator'=>sanitize_text_field((string)($record['locator'] ?? '')),
+                'sha256'=>sanitize_text_field((string)($record['sha256'] ?? '')),
+                'bytes'=>(int)($record['bytes'] ?? 0),
+            ];
+        }
+        return $clean;
+    }
+
     private static function store_result($batch_id, $status, array $result, $store_ticket) {
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
@@ -331,18 +407,24 @@ final class SPF_Fiscal_Batch_Beta_Manager {
         $metadata = is_array($metadata) ? $metadata : [];
         $previous = is_array($metadata['fiscal_beta_batch'] ?? null) ? $metadata['fiscal_beta_batch'] : [];
         $ticket = sanitize_text_field((string)($result['ticket'] ?? ($batch['remote_ticket'] ?? '')));
+        $archive = is_array($result['evidence_archive'] ?? null)
+            ? self::sanitize_archive($result['evidence_archive'])
+            : (is_array($previous['evidence_archive'] ?? null) ? $previous['evidence_archive'] : []);
         $evidence = [
             'status'=>sanitize_key((string)$status),
+            'remote_outcome_status'=>sanitize_key((string)($result['remote_outcome_status'] ?? ($previous['remote_outcome_status'] ?? ''))),
             'transport'=>sanitize_key((string)($result['transport'] ?? ($previous['transport'] ?? ''))),
             'environment'=>'beta',
             'ticket'=>$ticket,
-            'status_code'=>sanitize_text_field((string)($result['status_code'] ?? '')),
-            'remote_code'=>sanitize_text_field((string)($result['remote_code'] ?? '')),
-            'remote_message'=>sanitize_text_field((string)($result['remote_message'] ?? ($result['error'] ?? ''))),
-            'notes'=>array_map('sanitize_text_field',(array)($result['notes'] ?? [])),
+            'status_code'=>sanitize_text_field((string)($result['status_code'] ?? ($previous['status_code'] ?? ''))),
+            'remote_code'=>sanitize_text_field((string)($result['remote_code'] ?? ($previous['remote_code'] ?? ''))),
+            'remote_message'=>sanitize_text_field((string)($result['remote_message'] ?? ($result['error'] ?? ($previous['remote_message'] ?? '')))),
+            'notes'=>array_map('sanitize_text_field',(array)($result['notes'] ?? ($previous['notes'] ?? []))),
             'request_zip_sha256'=>sanitize_text_field((string)($result['request_zip_sha256'] ?? ($previous['request_zip_sha256'] ?? ''))),
-            'response_zip_sha256'=>sanitize_text_field((string)($result['response_zip_sha256'] ?? '')),
-            'cdr_xml_sha256'=>sanitize_text_field((string)($result['cdr_xml_sha256'] ?? '')),
+            'response_zip_sha256'=>sanitize_text_field((string)($result['response_zip_sha256'] ?? ($previous['response_zip_sha256'] ?? ''))),
+            'cdr_xml_sha256'=>sanitize_text_field((string)($result['cdr_xml_sha256'] ?? ($previous['cdr_xml_sha256'] ?? ''))),
+            'evidence_error'=>sanitize_text_field((string)($result['evidence_error'] ?? '')),
+            'evidence_archive'=>$archive,
             'production'=>false,
             'submitted_at'=>sanitize_text_field((string)($previous['submitted_at'] ?? ($store_ticket ? current_time('mysql') : ''))),
             'checked_at'=>current_time('mysql'),

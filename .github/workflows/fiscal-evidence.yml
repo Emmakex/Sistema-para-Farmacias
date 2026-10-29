@@ -1,0 +1,81 @@
+name: Fiscal Evidence Archive
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax for evidence layer
+        run: |
+          php -l includes/fiscal/interface-spf-fiscal-evidence-store.php
+          php -l includes/class-spf-fiscal-evidence-store-registry.php
+          php -l includes/fiscal/class-spf-fiscal-evidence-filesystem.php
+          php -l includes/class-spf-fiscal-evidence-manager.php
+          php -l includes/class-spf-fiscal-batch-beta-manager.php
+          php -l includes/countries/peru/class-spf-fiscal-transport-peru-beta.php
+          php -l tests/fiscal-evidence-archive-smoke.php
+      - name: Fiscal evidence archive smoke
+        run: php tests/fiscal-evidence-archive-smoke.php
+      - name: Private archive invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider='includes/fiscal/class-spf-fiscal-evidence-filesystem.php'
+          manager='includes/class-spf-fiscal-evidence-manager.php'
+          beta_manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          country='includes/countries/class-spf-country-peru.php'
+          main='sistema-para-farmacias.php'
+
+          grep -Fq 'SPF_FISCAL_EVIDENCE_DIR' "$provider"
+          grep -Fq 'spf_evidence_root_web' "$provider"
+          grep -Fq 'LOCK_EX' "$provider"
+          grep -Fq 'hash_file' "$provider"
+          grep -Fq 'rename($tmp, $target)' "$provider"
+          grep -Fq "'evidence_store'=>'external_filesystem'" "$country"
+          grep -Fq 'SPF_Fiscal_Evidence_Store_Registry::register' "$main"
+          grep -Fq 'SPF_Fiscal_Evidence_Manager::archive_batch_cdr' "$beta_manager"
+          grep -Fq "'beta_batch_evidence_error'" "$beta_manager"
+          grep -Fq "record(\$batch_id, 'evidence_archived'" "$beta_manager"
+          grep -Fq "record(\$batch_id, 'evidence_error'" "$beta_manager"
+
+          if grep -Fq 'cdr_zip_bytes' "$beta_manager" || grep -Fq 'cdr_xml_bytes' "$beta_manager"; then
+            echo 'Raw CDR bytes must never enter generic beta manager/database metadata'
+            exit 1
+          fi
+          if grep -RInE 'SoapClient|__soapCall|wp_remote_|curl_' --include='*evidence*.php' includes; then
+            echo 'Evidence archive layer must remain network-free'
+            exit 1
+          fi
+          if grep -RInF 'base64_encode' --include='*evidence*.php' includes; then
+            echo 'Raw fiscal evidence must not be encoded for database persistence'
+            exit 1
+          fi
+      - name: Ledger ordering with physical archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          poll_result_line="$(grep -n "record(\$batch_id, 'poll_result'" "$manager" | head -1 | cut -d: -f1)"
+          archive_call_line="$(grep -n 'archive_batch_cdr(\$batch_id, \$result)' "$manager" | head -1 | cut -d: -f1)"
+          archived_event_line="$(grep -n "record(\$batch_id, 'evidence_archived'" "$manager" | head -1 | cut -d: -f1)"
+          final_store_line="$(grep -n 'store_result(\$batch_id, \$status, \$result, false)' "$manager" | tail -1 | cut -d: -f1)"
+          test -n "$poll_result_line" -a -n "$archive_call_line" -a "$poll_result_line" -lt "$archive_call_line"
+          test -n "$archived_event_line" -a -n "$final_store_line" -a "$archived_event_line" -lt "$final_store_line"
+      - name: Beta remains non-production
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          if grep -En "['\"]fiscal_status['\"]\s*=>" "$manager"; then
+            echo 'Evidence archive must never promote beta into fiscal_status'
+            exit 1
+          fi
+          if grep -RInF 'e-factura.sunat.gob.pe' --include='*.php' .; then
+            echo 'Production fiscal endpoint must remain absent'
+            exit 1
+          fi

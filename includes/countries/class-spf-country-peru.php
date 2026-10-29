@@ -25,6 +25,7 @@ final class SPF_Country_Peru {
                 'authority'=>'SUNAT',
                 'adapter'=>'peru',
                 'default_transport'=>'dry_run',
+                'evidence_store'=>'external_filesystem',
                 'signature_profile'=>[
                     'signer'=>'xmldsig',
                     'credentials_provider'=>'environment_p12',
