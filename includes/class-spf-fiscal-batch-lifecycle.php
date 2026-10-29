@@ -67,11 +67,15 @@ final class SPF_Fiscal_Batch_Lifecycle {
     }
 
     public static function sign_batch($batch_id) {
+        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+        if (!$batch) { return new WP_Error('spf_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
+            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto y su evidencia local queda congelada.', 'sistema-para-farmacias'));
+        }
         $result = self::build_signed_payload($batch_id);
         if (is_wp_error($result)) { self::store_signature_error($batch_id, $result->get_error_message()); return $result; }
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
-        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
         $metadata = self::metadata($batch['response_body'] ?? '');
         $metadata['local_signature'] = [
             'status'=>'verified',
@@ -83,7 +87,7 @@ final class SPF_Fiscal_Batch_Lifecycle {
             'unsigned_xml_sha256'=>sanitize_text_field((string)($result['unsigned_xml_sha256'] ?? '')),
             'verified_at'=>current_time('mysql'),
         ];
-        unset($metadata['local_validation'], $metadata['fiscal_beta']);
+        unset($metadata['local_validation'], $metadata['fiscal_beta_batch']);
         $updated = $wpdb->update($table, [
             'signature_status'=>'verified',
             'signature_method'=>sanitize_text_field((string)($result['signature_method'] ?? '')),
@@ -102,6 +106,9 @@ final class SPF_Fiscal_Batch_Lifecycle {
     public static function validate_batch($batch_id) {
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
         if (!$batch) { return new WP_Error('spf_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+        if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
+            return new WP_Error('spf_batch_remote_locked', __('El lote ya tiene un ticket remoto y su evidencia local queda congelada.', 'sistema-para-farmacias'));
+        }
         if (sanitize_key((string)($batch['signature_status'] ?? '')) !== 'verified') {
             $error = new WP_Error('spf_batch_validation_unsigned', __('Firma y verifica localmente el lote antes de validarlo.', 'sistema-para-farmacias'));
             self::store_validation($batch_id, 'validation_error', ['errors'=>[$error->get_error_message()]]);
@@ -152,10 +159,10 @@ final class SPF_Fiscal_Batch_Lifecycle {
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch) { return; }
+        if (!$batch || trim((string)($batch['remote_ticket'] ?? '')) !== '') { return; }
         $metadata = self::metadata($batch['response_body'] ?? '');
         $metadata['local_signature'] = ['status'=>'signature_error','message'=>sanitize_text_field((string)$message),'verified_at'=>current_time('mysql')];
-        unset($metadata['local_validation'], $metadata['fiscal_beta']);
+        unset($metadata['local_validation'], $metadata['fiscal_beta_batch']);
         $wpdb->update($table, [
             'signature_status'=>'signature_error','signature_method'=>'','signature_certificate_sha256'=>'','signature_xml_sha256'=>'',
             'validation_status'=>'not_validated','validation_xml_sha256'=>'','transport_status'=>'not_prepared','beta_status'=>'not_tested',
@@ -167,9 +174,9 @@ final class SPF_Fiscal_Batch_Lifecycle {
         global $wpdb;
         $table = SPF_Database::table('fiscal_batches');
         $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
-        if (!$batch) { return; }
+        if (!$batch || trim((string)($batch['remote_ticket'] ?? '')) !== '') { return; }
         $metadata = self::metadata($batch['response_body'] ?? '');
-        unset($metadata['fiscal_beta']);
+        unset($metadata['fiscal_beta_batch']);
         $metadata['local_validation'] = [
             'status'=>sanitize_key((string)$status),
             'errors'=>array_map('sanitize_text_field',(array)($result['errors'] ?? [])),
