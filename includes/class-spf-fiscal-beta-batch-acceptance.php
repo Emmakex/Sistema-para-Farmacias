@@ -99,11 +99,16 @@ final class SPF_Fiscal_Beta_Batch_Acceptance {
 
         $final_poll_intent = null;
         if ($ticket_event && $final_poll) {
+            $previous_poll_event = null;
             foreach ($stream as $event) {
-                if (sanitize_key((string)($event['operation'] ?? '')) !== 'poll_intent') { continue; }
                 if ($event_id($event) <= $event_id($ticket_event) || $event_id($event) >= $event_id($final_poll)) { continue; }
                 if ($ticket_of($event) !== $ticket_of($final_poll)) { continue; }
-                $final_poll_intent = $event;
+                $operation = sanitize_key((string)($event['operation'] ?? ''));
+                if (!in_array($operation, ['poll_intent','poll_result','poll_error'], true)) { continue; }
+                $previous_poll_event = $event;
+            }
+            if ($previous_poll_event && sanitize_key((string)($previous_poll_event['operation'] ?? '')) === 'poll_intent') {
+                $final_poll_intent = $previous_poll_event;
             }
         }
 
