@@ -32,6 +32,7 @@ function batch_event($id, $operation, $evidence, $ticket = '', array $extra = []
 }
 
 $xml = str_repeat('a',64);
+$old_xml = str_repeat('9',64);
 $cert = str_repeat('b',64);
 $request_zip = str_repeat('c',64);
 $response_zip = str_repeat('d',64);
@@ -77,7 +78,7 @@ $batch = [
     'response_body'=>json_encode($projection),
 ];
 $events = [
-    batch_event(8,'evidence_archived',$evidence,$ticket,[
+    batch_event(10,'evidence_archived',$evidence,$ticket,[
         'beta_status'=>'beta_batch_accepted',
         'status_code'=>'0',
         'response_zip_sha256'=>$response_zip,
@@ -86,7 +87,7 @@ $events = [
         'remote_message'=>'Aceptado',
         'metadata_body'=>json_encode($archive),
     ]),
-    batch_event(7,'poll_result',$evidence,$ticket,[
+    batch_event(9,'poll_result',$evidence,$ticket,[
         'beta_status'=>'beta_batch_accepted',
         'status_code'=>'0',
         'response_zip_sha256'=>$response_zip,
@@ -94,20 +95,22 @@ $events = [
         'remote_code'=>'0',
         'remote_message'=>'Aceptado',
     ]),
-    batch_event(6,'poll_intent',$evidence,$ticket,['beta_status'=>'beta_batch_processing']),
-    batch_event(5,'poll_result',$evidence,$ticket,['beta_status'=>'beta_batch_processing','status_code'=>'98']),
-    batch_event(4,'poll_intent',$evidence,$ticket,['beta_status'=>'beta_batch_ticketed']),
-    batch_event(3,'ticket_received',$evidence,$ticket,[
+    batch_event(8,'poll_intent',$evidence,$ticket,['beta_status'=>'beta_batch_processing']),
+    batch_event(7,'poll_result',$evidence,$ticket,['beta_status'=>'beta_batch_processing','status_code'=>'98']),
+    batch_event(6,'poll_intent',$evidence,$ticket,['beta_status'=>'beta_batch_ticketed']),
+    batch_event(5,'ticket_recovered',$evidence,$ticket,['beta_status'=>'beta_batch_ticketed']),
+    batch_event(4,'ticket_received',$evidence,$ticket,[
         'beta_status'=>'beta_batch_ticketed',
         'request_xml_sha256'=>$xml,
         'request_zip_sha256'=>$request_zip,
     ]),
-    batch_event(2,'ticket_recovered',$evidence,$ticket,['beta_status'=>'beta_batch_ticketed']),
-    batch_event(1,'submit_intent',$evidence,'',['beta_status'=>'not_tested','request_xml_sha256'=>$xml]),
+    batch_event(3,'submit_intent',$evidence,'',['beta_status'=>'not_tested','request_xml_sha256'=>$xml]),
+    batch_event(2,'submit_error',$evidence,'',['beta_status'=>'beta_batch_transport_error','request_xml_sha256'=>$old_xml]),
+    batch_event(1,'submit_intent',$evidence,'',['beta_status'=>'not_tested','request_xml_sha256'=>$old_xml]),
 ];
 
 $ok = SPF_Fiscal_Beta_Batch_Acceptance::assess($batch,$events,$evidence);
-assert_batch_acceptance(!empty($ok['certified']), 'complete async batch chain with intermediate processing poll must certify');
+assert_batch_acceptance(!empty($ok['certified']), 'complete async batch chain with retry and intermediate processing poll must certify');
 assert_batch_acceptance(empty($ok['failed']), 'certified batch chain must have no failed checks');
 
 $production = $batch;
@@ -120,7 +123,7 @@ $wrong_ticket[0]['ticket'] = 'OTHER-TICKET';
 $result = SPF_Fiscal_Beta_Batch_Acceptance::assess($batch,$wrong_ticket,$evidence);
 assert_batch_acceptance(empty($result['certified']) && in_array('ticket_consistency',$result['failed'],true), 'ticket mismatch must block certification');
 
-$missing_final_intent = array_values(array_filter($events, static function($event) { return (int)$event['id'] !== 6; }));
+$missing_final_intent = array_values(array_filter($events, static function($event) { return (int)$event['id'] !== 8; }));
 $result = SPF_Fiscal_Beta_Batch_Acceptance::assess($batch,$missing_final_intent,$evidence);
 assert_batch_acceptance(empty($result['certified']) && in_array('event_order',$result['failed'],true), 'final poll without its own preceding intent must block certification');
 
