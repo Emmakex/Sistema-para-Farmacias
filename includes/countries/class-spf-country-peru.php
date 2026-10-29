@@ -20,6 +20,27 @@ final class SPF_Country_Peru {
                 'rate' => 18.0,
                 'included_in_price' => true,
             ],
+            'default_tax_class' => 'gravado',
+            'tax_classes' => [
+                'gravado' => [
+                    'label' => __('Afecto IGV', 'sistema-para-farmacias'),
+                    'rate' => 18.0,
+                    'taxable' => true,
+                    'included_in_price' => true,
+                ],
+                'exonerado' => [
+                    'label' => __('Exonerado', 'sistema-para-farmacias'),
+                    'rate' => 0.0,
+                    'taxable' => false,
+                    'included_in_price' => true,
+                ],
+                'inafecto' => [
+                    'label' => __('Inafecto', 'sistema-para-farmacias'),
+                    'rate' => 0.0,
+                    'taxable' => false,
+                    'included_in_price' => true,
+                ],
+            ],
             'person_documents' => [
                 'DNI' => __('DNI', 'sistema-para-farmacias'),
                 'CE' => __('Carné de extranjería', 'sistema-para-farmacias'),
