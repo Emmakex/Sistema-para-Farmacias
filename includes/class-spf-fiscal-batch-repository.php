@@ -158,7 +158,10 @@ final class SPF_Fiscal_Batch_Repository {
         $snapshots = [];
         foreach ($lines as $line) { $snapshots[] = self::line_snapshot($line); }
         usort($snapshots, function($a,$b){ return ((int)$a['document_id']) <=> ((int)$b['document_id']); });
-        $payload = ['context'=>$context_snapshot,'lines'=>$snapshots];
+        $identity_context = $context_snapshot;
+        unset($identity_context['sequence'], $identity_context['issue_date']);
+        ksort($identity_context);
+        $payload = ['context'=>$identity_context,'lines'=>$snapshots];
         return hash('sha256', wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
