@@ -41,7 +41,7 @@ final class SPF_Fiscal_Document_Remote_Event_Repository {
         return SPF_Database::table('fiscal_document_remote_events');
     }
 
-    public static function evidence_sha256($document_id, $transport, $environment = 'beta') {
+    public static function evidence_sha256($document_id, $transport, $environment = 'beta', array $package = []) {
         global $wpdb;
         $table = SPF_Database::table('invoices');
         $row = $wpdb->get_row($wpdb->prepare(
@@ -49,16 +49,20 @@ final class SPF_Fiscal_Document_Remote_Event_Repository {
             absint($document_id)
         ), ARRAY_A);
         if (!$row) { return ''; }
+        $signed_hash = self::sha((string)($package['xml_sha256'] ?? $row['signature_xml_sha256'] ?? ''));
+        $certificate_hash = self::sha((string)($package['signature_certificate_sha256'] ?? $row['signature_certificate_sha256'] ?? ''));
+        $validation_hash = self::sha((string)($package['validation_xml_sha256'] ?? $row['validation_xml_sha256'] ?? ''));
+        if ($signed_hash === '' || $certificate_hash === '' || $validation_hash === '') { return ''; }
         $evidence = [
             'document_id'=>(int)$row['id'],
             'sale_id'=>(int)$row['sale_id'],
-            'country_code'=>SPF_Config::country_code(),
-            'document_type'=>sanitize_key((string)$row['document_type']),
-            'series'=>strtoupper(sanitize_text_field((string)$row['serie'])),
-            'correlative'=>sanitize_text_field((string)$row['correlative']),
-            'signature_xml_sha256'=>self::sha((string)$row['signature_xml_sha256']),
-            'signature_certificate_sha256'=>self::sha((string)$row['signature_certificate_sha256']),
-            'validation_xml_sha256'=>self::sha((string)$row['validation_xml_sha256']),
+            'country_code'=>sanitize_key((string)($package['country'] ?? SPF_Config::country_code())),
+            'document_type'=>sanitize_key((string)($package['document_type'] ?? $row['document_type'])),
+            'series'=>strtoupper(sanitize_text_field((string)($package['series'] ?? $row['serie']))),
+            'correlative'=>sanitize_text_field((string)($package['correlative'] ?? $row['correlative'])),
+            'signature_xml_sha256'=>$signed_hash,
+            'signature_certificate_sha256'=>$certificate_hash,
+            'validation_xml_sha256'=>$validation_hash,
             'transport'=>sanitize_key((string)$transport),
             'environment'=>sanitize_key((string)$environment),
         ];
