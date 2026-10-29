@@ -46,6 +46,8 @@ if (class_exists('SoapClient') && !class_exists('SPF_Fiscal_Peru_Beta_Soap_Clien
 
 final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Interface {
     const WSDL = 'https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService?wsdl';
+    const TEST_USER = 'MODDATOS';
+    const TEST_PASSWORD = 'MODDATOS';
 
     public function code() { return 'peru_beta'; }
     public function environment() { return 'beta'; }
@@ -95,7 +97,7 @@ final class SPF_Fiscal_Transport_Peru_Beta implements SPF_Fiscal_Transport_Inter
                 'stream_context'=>$context,
                 'user_agent'=>'Sistema-para-Farmacias/' . (defined('SPF_VERSION') ? SPF_VERSION : 'dev'),
             ]);
-            $client->spf_set_credentials($ruc . 'MODDATOS', 'moddatos');
+            $client->spf_set_credentials($ruc . self::TEST_USER, self::TEST_PASSWORD);
             $response = $client->__soapCall('sendBill', [['fileName'=>$zip_name,'contentFile'=>$zip_bytes]]);
         } catch (Throwable $e) {
             return new WP_Error('spf_beta_soap_error', sanitize_text_field($e->getMessage()));
