@@ -20,6 +20,8 @@ jobs:
         run: php tests/fiscal-daily-summary-smoke.php
       - name: Fiscal batch snapshot idempotency smoke
         run: php tests/fiscal-batch-persistence-smoke.php
+      - name: Fiscal batch SummaryDocuments signing and validation smoke
+        run: php tests/fiscal-batch-sign-validate-smoke.php
       - name: Peru beta fail-closed smoke
         run: php tests/fiscal-beta-smoke.php
       - name: Country-neutral core guard
@@ -32,6 +34,7 @@ jobs:
             --exclude='fiscal-beta-smoke.php' \
             --exclude='fiscal-daily-summary-smoke.php' \
             --exclude='fiscal-batch-persistence-smoke.php' \
+            --exclude='fiscal-batch-sign-validate-smoke.php' \
             --exclude-dir='.git' \
             . || true)"
           if [ -n "$violations" ]; then
@@ -116,6 +119,30 @@ jobs:
           fi
           if grep -RInE "__soapCall|sendSummary|getStatus" --include='*batch*.php' includes; then
             echo "Persistent batch layer must remain network-free"
+            exit 1
+          fi
+      - name: Fiscal batch signing and validation invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          lifecycle='includes/class-spf-fiscal-batch-lifecycle.php'
+          integrity='includes/class-spf-fiscal-batch-integrity.php'
+          country='includes/countries/class-spf-country-peru.php'
+          activator='includes/class-spf-activator.php'
+          grep -Fq 'SPF_Fiscal_Batch_Integrity::reconstruct' "$lifecycle"
+          grep -Fq 'signature_xml_sha256' "$lifecycle"
+          grep -Fq 'signature_certificate_sha256' "$lifecycle"
+          grep -Fq 'hash_equals($stored_signed_hash, $current_signed_hash)' "$lifecycle"
+          grep -Fq 'hash_equals($stored_certificate_hash, $current_certificate_hash)' "$lifecycle"
+          grep -Fq 'snapshot_sha256' "$integrity"
+          grep -Fq 'xml_sha256' "$integrity"
+          grep -Fq "'SPF_FISCAL_PERU_SUMMARY_XSD_PATH'" "$country"
+          grep -Fq "'SPF_FISCAL_PERU_SUMMARY_XSL_PATH'" "$country"
+          grep -Fq 'signature_certificate_sha256 VARCHAR(64)' "$activator"
+          grep -Fq 'signature_xml_sha256 VARCHAR(64)' "$activator"
+          grep -Fq 'validation_xml_sha256 VARCHAR(64)' "$activator"
+          if grep -RInE "__soapCall|sendSummary|getStatus|wp_remote_|curl_" --include='*batch*.php' includes; then
+            echo "Batch signing/validation cut must remain local-only"
             exit 1
           fi
       - name: Fiscal credentials stay outside repository and database
