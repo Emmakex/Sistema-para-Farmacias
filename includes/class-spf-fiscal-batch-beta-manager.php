@@ -10,6 +10,7 @@ final class SPF_Fiscal_Batch_Beta_Manager {
     public function hooks() {
         add_action('admin_post_spf_fiscal_batch_beta_submit', [$this, 'handle_submit']);
         add_action('admin_post_spf_fiscal_batch_beta_poll', [$this, 'handle_poll']);
+        add_action('admin_post_spf_fiscal_batch_beta_recover_ticket', [$this, 'handle_recover_ticket']);
     }
 
     public static function statuses() {
@@ -35,6 +36,16 @@ final class SPF_Fiscal_Batch_Beta_Manager {
     public static function enabled($batch_type) {
         $transport = self::transport($batch_type);
         return $transport && $transport->batch_enabled();
+    }
+
+    public static function recoverable_ticket($batch_id) {
+        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+        if (!$batch || trim((string)($batch['remote_ticket'] ?? '')) !== '') { return null; }
+        $transport = self::transport((string)($batch['batch_type'] ?? ''));
+        if (!$transport) { return null; }
+        $evidence = SPF_Fiscal_Batch_Remote_Event_Repository::evidence_sha256($batch, $transport->code(), $transport->environment());
+        $event = SPF_Fiscal_Batch_Remote_Event_Repository::latest_ticket($batch_id, $evidence);
+        return is_array($event) ? $event : null;
     }
 
     public static function build_submit_package($batch_id) {
@@ -104,15 +115,37 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             if (sanitize_key((string)($revalidation['validation_status'] ?? '')) !== 'valid_local') {
                 return new WP_Error('spf_beta_batch_revalidation_required', __('El XML firmado exacto debe volver a superar XSD y XSL inmediatamente antes del envío beta.', 'sistema-para-farmacias'));
             }
+            $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
             $package = self::build_submit_package($batch_id);
             if (is_wp_error($package)) { return $package; }
             $inspection = $transport->inspect_batch($package);
             if (is_wp_error($inspection)) { return $inspection; }
             if (empty($inspection['ok'])) { return new WP_Error('spf_beta_batch_inspection', implode(' ', (array)($inspection['errors'] ?? []))); }
 
+            $evidence = SPF_Fiscal_Batch_Remote_Event_Repository::evidence_sha256($batch, $transport->code(), $transport->environment());
+            $existing_ticket = SPF_Fiscal_Batch_Remote_Event_Repository::latest_ticket($batch_id, $evidence);
+            if (is_array($existing_ticket)) {
+                return new WP_Error('spf_beta_batch_recovery_required', __('Ya existe un ticket remoto registrado para esta misma evidencia. Recupéralo en lugar de reenviar el lote.', 'sistema-para-farmacias'));
+            }
+            $intent = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'submit_intent', $evidence, [
+                'transport'=>$transport->code(),
+                'environment'=>$transport->environment(),
+                'request_xml_sha256'=>$package['xml_sha256'],
+                'beta_status'=>'not_tested',
+                'metadata'=>['identifier'=>$package['identifier'],'reference_date'=>$package['reference_date']],
+            ]);
+            if (is_wp_error($intent)) { return $intent; }
+
             set_transient(self::SUBMIT_COOLDOWN, 1, 15);
             $result = $transport->submit_batch($package);
             if (is_wp_error($result)) {
+                SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'submit_error', $evidence, [
+                    'transport'=>$transport->code(),
+                    'environment'=>$transport->environment(),
+                    'request_xml_sha256'=>$package['xml_sha256'],
+                    'beta_status'=>'beta_batch_transport_error',
+                    'remote_message'=>$result->get_error_message(),
+                ]);
                 self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message()], false);
                 return $result;
             }
@@ -120,11 +153,36 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             $ticket = sanitize_text_field((string)($result['ticket'] ?? ''));
             if ($ticket === '') {
                 $error = new WP_Error('spf_beta_batch_ticket_empty', __('El transporte beta no devolvió un ticket persistible.', 'sistema-para-farmacias'));
+                SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'submit_error', $evidence, [
+                    'transport'=>$transport->code(),
+                    'environment'=>$transport->environment(),
+                    'request_xml_sha256'=>$package['xml_sha256'],
+                    'request_zip_sha256'=>$result['request_zip_sha256'] ?? '',
+                    'beta_status'=>'beta_batch_transport_error',
+                    'remote_message'=>$error->get_error_message(),
+                ]);
                 self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$error->get_error_message()], false);
                 return $error;
             }
+
+            $ticket_event = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'ticket_received', $evidence, [
+                'transport'=>$transport->code(),
+                'environment'=>$transport->environment(),
+                'ticket'=>$ticket,
+                'beta_status'=>$status,
+                'request_xml_sha256'=>$package['xml_sha256'],
+                'request_zip_sha256'=>$result['request_zip_sha256'] ?? '',
+                'metadata'=>['zip_name'=>sanitize_file_name((string)($result['zip_name'] ?? ''))],
+            ]);
+            if (is_wp_error($ticket_event)) {
+                $stored = self::store_result($batch_id, $status, $result, true);
+                if ($stored) {
+                    return new WP_Error('spf_beta_batch_ledger_store', __('El ticket quedó asociado al lote, pero falló el registro append-only de evidencia. No reenvíes este lote y revisa la base de datos.', 'sistema-para-farmacias'));
+                }
+                return new WP_Error('spf_beta_batch_ticket_unrecoverable', sprintf(__('Se recibió el ticket beta %s pero falló tanto el ledger como la asociación al lote. No reenvíes el lote hasta intervención técnica.', 'sistema-para-farmacias'), $ticket));
+            }
             if (!self::store_result($batch_id, $status, $result, true)) {
-                return new WP_Error('spf_beta_batch_ticket_store', sprintf(__('Se recibió el ticket beta %s pero no pudo persistirse. No reenvíes el lote hasta recuperar esta evidencia.', 'sistema-para-farmacias'), $ticket));
+                return new WP_Error('spf_beta_batch_ticket_store', __('El ticket remoto quedó preservado en el ledger, pero no pudo asociarse al lote. Usa la acción de recuperación y no reenvíes.', 'sistema-para-farmacias'));
             }
             return $result;
         } finally {
@@ -158,17 +216,90 @@ final class SPF_Fiscal_Batch_Beta_Manager {
                 'issuer_tax_id'=>sanitize_text_field((string)($issuer['tax_id'] ?? '')),
                 'ticket'=>$ticket,
             ];
+            $evidence = SPF_Fiscal_Batch_Remote_Event_Repository::evidence_sha256($batch, $transport->code(), $transport->environment());
+            $intent = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'poll_intent', $evidence, [
+                'transport'=>$transport->code(),
+                'environment'=>$transport->environment(),
+                'ticket'=>$ticket,
+                'beta_status'=>sanitize_key((string)($batch['beta_status'] ?? '')),
+            ]);
+            if (is_wp_error($intent)) { return $intent; }
+
             set_transient(self::POLL_COOLDOWN, 1, 5);
             $result = $transport->poll_batch($package);
             if (is_wp_error($result)) {
+                SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'poll_error', $evidence, [
+                    'transport'=>$transport->code(),
+                    'environment'=>$transport->environment(),
+                    'ticket'=>$ticket,
+                    'beta_status'=>'beta_batch_transport_error',
+                    'remote_message'=>$result->get_error_message(),
+                ]);
                 self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$result->get_error_message(),'ticket'=>$ticket], false);
                 return $result;
             }
             $status = self::normalize_status($result['beta_status'] ?? '');
+            $poll_event = SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'poll_result', $evidence, [
+                'transport'=>$transport->code(),
+                'environment'=>$transport->environment(),
+                'ticket'=>$ticket,
+                'beta_status'=>$status,
+                'status_code'=>$result['status_code'] ?? '',
+                'response_zip_sha256'=>$result['response_zip_sha256'] ?? '',
+                'cdr_xml_sha256'=>$result['cdr_xml_sha256'] ?? '',
+                'remote_code'=>$result['remote_code'] ?? '',
+                'remote_message'=>$result['remote_message'] ?? '',
+                'metadata'=>['notes'=>array_values((array)($result['notes'] ?? []))],
+            ]);
+            if (is_wp_error($poll_event)) {
+                return new WP_Error('spf_beta_batch_poll_ledger', __('La consulta remota respondió, pero no pudo preservarse en el ledger append-only. El lote no se actualizará con ese resultado.', 'sistema-para-farmacias'));
+            }
             if (!self::store_result($batch_id, $status, $result, false)) {
-                return new WP_Error('spf_beta_batch_status_store', __('La consulta beta respondió, pero no pudo persistirse su evidencia.', 'sistema-para-farmacias'));
+                return new WP_Error('spf_beta_batch_status_store', __('La consulta beta quedó preservada en el ledger, pero no pudo reflejarse en el lote principal.', 'sistema-para-farmacias'));
             }
             return $result;
+        } finally {
+            self::release_lock();
+        }
+    }
+
+    public static function recover_ticket($batch_id) {
+        if (!self::acquire_lock()) {
+            return new WP_Error('spf_beta_batch_busy', __('Ya hay una operación beta de lote en curso en esta instalación.', 'sistema-para-farmacias'));
+        }
+        try {
+            $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+            if (!$batch) { return new WP_Error('spf_beta_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+            if (trim((string)($batch['remote_ticket'] ?? '')) !== '') {
+                return new WP_Error('spf_beta_batch_ticket_exists', __('El lote ya tiene un ticket asociado y no necesita recuperación.', 'sistema-para-farmacias'));
+            }
+            $transport = self::transport((string)($batch['batch_type'] ?? ''));
+            if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('No existe el transporte asociado a este lote.', 'sistema-para-farmacias')); }
+            $evidence = SPF_Fiscal_Batch_Remote_Event_Repository::evidence_sha256($batch, $transport->code(), $transport->environment());
+            $event = SPF_Fiscal_Batch_Remote_Event_Repository::latest_ticket($batch_id, $evidence);
+            if (!$event) { return new WP_Error('spf_beta_batch_no_recoverable_ticket', __('No existe un ticket recuperable que coincida con la evidencia criptográfica actual del lote.', 'sistema-para-farmacias')); }
+            $ticket = sanitize_text_field((string)($event['ticket'] ?? ''));
+            if ($ticket === '') { return new WP_Error('spf_beta_batch_no_recoverable_ticket', __('El evento remoto no contiene un ticket recuperable.', 'sistema-para-farmacias')); }
+            $result = [
+                'transport'=>sanitize_key((string)($event['transport'] ?? $transport->code())),
+                'environment'=>sanitize_key((string)($event['environment'] ?? $transport->environment())),
+                'ticket'=>$ticket,
+                'beta_status'=>sanitize_key((string)($event['beta_status'] ?? 'beta_batch_ticketed')),
+                'request_zip_sha256'=>sanitize_text_field((string)($event['request_zip_sha256'] ?? '')),
+            ];
+            $status = self::normalize_status($result['beta_status']);
+            if (!self::store_result($batch_id, $status, $result, true)) {
+                return new WP_Error('spf_beta_batch_recovery_store', __('No se pudo asociar al lote el ticket preservado en el ledger.', 'sistema-para-farmacias'));
+            }
+            SPF_Fiscal_Batch_Remote_Event_Repository::record($batch_id, 'ticket_recovered', $evidence, [
+                'transport'=>$result['transport'],
+                'environment'=>$result['environment'],
+                'ticket'=>$ticket,
+                'beta_status'=>$status,
+                'request_zip_sha256'=>$result['request_zip_sha256'],
+                'metadata'=>['source_event_id'=>(int)($event['id'] ?? 0)],
+            ]);
+            return ['ticket'=>$ticket,'beta_status'=>$status];
         } finally {
             self::release_lock();
         }
@@ -244,6 +375,15 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             $status=sanitize_key((string)($result['beta_status']??''));
             $notice=['type'=>$status==='beta_batch_rejected'?'warning':'success','message'=>sprintf(__('Consulta beta del lote: %s. Esto no es una aceptación fiscal de producción.','sistema-para-farmacias'),self::statuses()[$status]??$status)];
         }
+        set_transient(self::NOTICE_PREFIX.get_current_user_id(),$notice,MINUTE_IN_SECONDS); wp_safe_redirect(admin_url('admin.php?page=spf-fiscal')); exit;
+    }
+
+    public function handle_recover_ticket() {
+        if (!current_user_can(SPF_Roles::INVOICES) && !current_user_can('manage_options')) { wp_die(esc_html__('No tienes permisos para recuperar tickets beta.', 'sistema-para-farmacias')); }
+        check_admin_referer('spf_fiscal_batch_beta_recover_ticket');
+        $result = self::recover_ticket(absint($_POST['batch_id'] ?? 0));
+        if (is_wp_error($result)) { $notice=['type'=>'error','message'=>$result->get_error_message()]; }
+        else { $notice=['type'=>'success','message'=>sprintf(__('Ticket beta recuperado desde el ledger append-only: %s.','sistema-para-farmacias'),sanitize_text_field((string)($result['ticket']??'')))]; }
         set_transient(self::NOTICE_PREFIX.get_current_user_id(),$notice,MINUTE_IN_SECONDS); wp_safe_redirect(admin_url('admin.php?page=spf-fiscal')); exit;
     }
 
