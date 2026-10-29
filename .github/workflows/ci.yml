@@ -141,7 +141,8 @@ jobs:
           grep -Fq 'signature_certificate_sha256' "$lifecycle"
           grep -Fq 'hash_equals($stored_signed_hash, $current_signed_hash)' "$lifecycle"
           grep -Fq 'hash_equals($stored_certificate_hash, $current_certificate_hash)' "$lifecycle"
-          grep -Fq "remote_ticket" "$lifecycle"
+          grep -Fq 'remote_ticket' "$lifecycle"
+          grep -Fq 'spf_batch_remote_locked' "$lifecycle"
           grep -Fq 'snapshot_sha256' "$integrity"
           grep -Fq 'xml_sha256' "$integrity"
           grep -Fq "'SPF_FISCAL_PERU_SUMMARY_XSD_PATH'" "$country"
@@ -163,10 +164,12 @@ jobs:
           grep -Fq 'SPF_Fiscal_Batch_Integrity::reconstruct' "$manager"
           grep -Fq 'validation_xml_sha256' "$manager"
           grep -Fq 'signature_certificate_sha256' "$manager"
-          grep -Fq "remote_ticket" "$manager"
+          grep -Fq 'remote_ticket' "$manager"
           grep -Fq "'production'=>false" "$manager"
           grep -Fq 'SUBMIT_COOLDOWN' "$manager"
           grep -Fq 'POLL_COOLDOWN' "$manager"
+          grep -Fq 'GET_LOCK' "$manager"
+          grep -Fq 'RELEASE_LOCK' "$manager"
           if grep -En "['\"]fiscal_status['\"]\s*=>" "$manager"; then
             echo "Beta batch manager must never write fiscal_status"
             exit 1
