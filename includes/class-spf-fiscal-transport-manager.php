@@ -45,6 +45,22 @@ final class SPF_Fiscal_Transport_Manager {
         if (is_wp_error($context)) { return $context; }
         $transport = self::active_transport();
         if (!$transport) { return new WP_Error('spf_transport_missing', __('No hay un transporte fiscal registrado.', 'sistema-para-farmacias')); }
+
+        $xml = $prepared['xml'];
+        $xml_sha256 = $prepared['sha256'];
+        $signed = false;
+        $signature_verified = false;
+        $signature_error = '';
+        $signature = SPF_Fiscal_Signing_Manager::build_signed_payload($document_id);
+        if (is_wp_error($signature)) {
+            $signature_error = $signature->get_error_message();
+        } else {
+            $xml = (string) ($signature['xml'] ?? $xml);
+            $xml_sha256 = (string) ($signature['signed_xml_sha256'] ?? hash('sha256', $xml));
+            $signed = !empty($signature['verified']);
+            $signature_verified = !empty($signature['verified']);
+        }
+
         $strategy = self::strategy_for_document($context['document']['type']);
         $reference = strtoupper($context['document']['series']) . '-' . (string) $context['document']['correlative'];
         return [
@@ -57,9 +73,11 @@ final class SPF_Fiscal_Transport_Manager {
             'document_type' => $context['document']['type'],
             'reference' => $reference,
             'filename' => sanitize_file_name($context['country_code'] . '-' . $reference . '.xml'),
-            'xml' => $prepared['xml'],
-            'xml_sha256' => $prepared['sha256'],
-            'signed' => false,
+            'xml' => $xml,
+            'xml_sha256' => $xml_sha256,
+            'signed' => $signed,
+            'signature_verified' => $signature_verified,
+            'signature_error' => sanitize_text_field($signature_error),
             'created_at' => current_time('mysql'),
         ];
     }
@@ -85,7 +103,9 @@ final class SPF_Fiscal_Transport_Manager {
             'strategy' => $package['strategy'],
             'package_filename' => $package['filename'],
             'xml_sha256' => $package['xml_sha256'],
-            'signed' => false,
+            'signed' => !empty($package['signed']),
+            'signature_verified' => !empty($package['signature_verified']),
+            'signature_error' => $package['signature_error'],
             'transmitted' => false,
             'ok' => !empty($result['ok']),
             'errors' => array_values((array) ($result['errors'] ?? [])),
@@ -111,8 +131,10 @@ final class SPF_Fiscal_Transport_Manager {
         $result = self::inspect($document_id);
         if (is_wp_error($result)) {
             $notice = ['type' => 'error', 'message' => $result->get_error_message()];
+        } elseif ($result['transport_status'] === 'dry_run_validated') {
+            $notice = ['type' => 'success', 'message' => __('Dry-run completado con firma local verificada. El transporte sigue sin capacidad de transmisión real.', 'sistema-para-farmacias')];
         } else {
-            $notice = ['type' => 'success', 'message' => __('Dry-run completado. El paquete es inspeccionable, pero continúa bloqueado para transmisión porque no está firmado.', 'sistema-para-farmacias')];
+            $notice = ['type' => 'warning', 'message' => __('Dry-run completado sin transmisión, pero el paquete continúa bloqueado porque no dispone de una firma local verificada.', 'sistema-para-farmacias')];
         }
         set_transient(self::NOTICE_PREFIX . get_current_user_id(), $notice, MINUTE_IN_SECONDS);
         wp_safe_redirect(admin_url('admin.php?page=spf-fiscal'));

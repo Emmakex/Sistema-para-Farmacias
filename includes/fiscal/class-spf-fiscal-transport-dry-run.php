@@ -17,10 +17,13 @@ final class SPF_Fiscal_Transport_Dry_Run implements SPF_Fiscal_Transport_Interfa
         if (empty($package['xml']) || !is_string($package['xml'])) {
             $errors[] = __('El paquete no contiene XML para inspeccionar.', 'sistema-para-farmacias');
         }
-        if (!empty($package['signed'])) {
-            $warnings[] = __('El dry-run no verifica criptográficamente firmas. La firma real se validará en un corte posterior.', 'sistema-para-farmacias');
+        if (!empty($package['signed']) && !empty($package['signature_verified'])) {
+            $warnings[] = __('La firma fue verificada localmente antes del dry-run. Este transporte no realiza validación remota.', 'sistema-para-farmacias');
         } else {
-            $warnings[] = __('El XML sigue sin firma digital; por diseño no puede transmitirse.', 'sistema-para-farmacias');
+            $warnings[] = __('El XML no dispone de una firma local verificada; por diseño no puede transmitirse.', 'sistema-para-farmacias');
+        }
+        if (!empty($package['signature_error'])) {
+            $warnings[] = sanitize_text_field((string) $package['signature_error']);
         }
         if (empty($package['filename'])) {
             $errors[] = __('El paquete fiscal no tiene nombre de archivo.', 'sistema-para-farmacias');
