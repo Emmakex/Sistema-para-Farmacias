@@ -1,10 +1,255 @@
 <?php
 if (!defined('ABSPATH')) { exit; }
+
 final class SPF_Activator {
- public static function activate(){SPF_Country_Peru::register();$current=sanitize_key((string)get_option(SPF_Config::COUNTRY_OPTION,''));if(!SPF_Country_Registry::exists($current)){$countries=SPF_Country_Registry::all();if($countries){update_option(SPF_Config::COUNTRY_OPTION,(string)array_key_first($countries));}}self::create_tables();SPF_Roles::ensure_roles();self::create_app_pages();update_option('spf_install_version',SPF_VERSION);}
- public static function maybe_upgrade(){if((string)get_option('spf_install_version','')===SPF_VERSION){return;}self::create_tables();update_option('spf_install_version',SPF_VERSION);}
- private static function valid_page($id){$id=absint($id);return$id>0&&get_post_status($id)!==false&&get_post_type($id)==='page';}
- private static function create_page($option,$legacy_option,$title,$slug,$shortcode){$current=absint(get_option($option,0));if(self::valid_page($current)){return$current;}$legacy=absint(get_option($legacy_option,0));if(self::valid_page($legacy)){update_option($option,$legacy);return$legacy;}$existing=get_page_by_path($slug,OBJECT,'page');if($existing){update_option($option,(int)$existing->ID);return(int)$existing->ID;}$id=wp_insert_post(['post_title'=>$title,'post_name'=>$slug,'post_content'=>$shortcode,'post_status'=>'publish','post_type'=>'page'],true);if(!is_wp_error($id)&&$id){update_option($option,(int)$id);return(int)$id;}return 0;}
- private static function create_app_pages(){self::create_page('spf_home_page_id','farmapos_home_page_id',__('Sistema para Farmacias','sistema-para-farmacias'),'sistema-farmacias','[spf_home]');self::create_page('spf_pos_page_id','farmapos_pos_page_id',__('Punto de venta','sistema-para-farmacias'),'punto-de-venta','[spf_pos]');}
- private static function create_tables(){global $wpdb;require_once ABSPATH.'wp-admin/includes/upgrade.php';$c=SPF_Database::charset_collate();$products=SPF_Database::table('products');$lots=SPF_Database::table('lots');$movements=SPF_Database::table('stock_movements');$customers=SPF_Database::table('customers');$sales=SPF_Database::table('sales');$sale_items=SPF_Database::table('sale_items');$documents=SPF_Database::table('invoices');dbDelta("CREATE TABLE $products (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,barcode VARCHAR(80) NULL,name VARCHAR(255) NOT NULL,active_ingredient VARCHAR(255) NULL,laboratory VARCHAR(160) NULL,category VARCHAR(160) NULL,purchase_price DECIMAL(12,2) DEFAULT 0,sale_price DECIMAL(12,2) DEFAULT 0,tax_type VARCHAR(30) DEFAULT '',stock_min INT DEFAULT 0,unit VARCHAR(40) DEFAULT 'unidad',status VARCHAR(30) DEFAULT 'active',created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY barcode (barcode),KEY name (name(191))) $c;");dbDelta("CREATE TABLE $lots (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,product_id BIGINT UNSIGNED NOT NULL,lot_number VARCHAR(120) NULL,expiry_date DATE NULL,quantity INT DEFAULT 0,purchase_price DECIMAL(12,2) DEFAULT 0,supplier VARCHAR(255) NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY product_id (product_id),KEY expiry_date (expiry_date)) $c;");dbDelta("CREATE TABLE $customers (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,document_type VARCHAR(20) DEFAULT '',document_number VARCHAR(30) NULL,name VARCHAR(255) NOT NULL,business_name VARCHAR(255) NULL,address TEXT NULL,email VARCHAR(190) NULL,phone VARCHAR(60) NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY document_number (document_number)) $c;");dbDelta("CREATE TABLE $sales (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,sale_number VARCHAR(60) NOT NULL,customer_id BIGINT UNSIGNED NULL,document_type VARCHAR(30) DEFAULT '',payment_method VARCHAR(60) DEFAULT '',subtotal DECIMAL(12,2) DEFAULT 0,igv DECIMAL(12,2) DEFAULT 0,total DECIMAL(12,2) DEFAULT 0,status VARCHAR(30) DEFAULT 'completed',user_id BIGINT UNSIGNED NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),UNIQUE KEY sale_number (sale_number),KEY customer_id (customer_id)) $c;");dbDelta("CREATE TABLE $sale_items (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,sale_id BIGINT UNSIGNED NOT NULL,product_id BIGINT UNSIGNED NOT NULL,lot_id BIGINT UNSIGNED NULL,product_name VARCHAR(255) NOT NULL,quantity INT NOT NULL,unit_price DECIMAL(12,2) DEFAULT 0,subtotal DECIMAL(12,2) DEFAULT 0,igv DECIMAL(12,2) DEFAULT 0,total DECIMAL(12,2) DEFAULT 0,tax_type VARCHAR(30) DEFAULT '',PRIMARY KEY (id),KEY sale_id (sale_id),KEY product_id (product_id)) $c;");dbDelta("CREATE TABLE $documents (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,sale_id BIGINT UNSIGNED NOT NULL,document_type VARCHAR(30) NOT NULL,serie VARCHAR(20) NULL,correlative VARCHAR(40) NULL,sunat_status VARCHAR(40) DEFAULT 'draft',internal_status VARCHAR(40) DEFAULT 'draft',signature_status VARCHAR(40) DEFAULT 'not_signed',signature_method VARCHAR(255) NULL,signature_certificate_sha256 VARCHAR(64) NULL,signature_xml_sha256 VARCHAR(64) NULL,validation_status VARCHAR(40) DEFAULT 'not_validated',validation_xml_sha256 VARCHAR(64) NULL,transport_status VARCHAR(40) DEFAULT 'not_prepared',beta_status VARCHAR(40) DEFAULT 'not_tested',fiscal_status VARCHAR(40) DEFAULT 'not_sent',fiscal_adapter VARCHAR(80) NULL,fiscal_remote_code VARCHAR(80) NULL,fiscal_remote_message TEXT NULL,pdf_url TEXT NULL,xml_url TEXT NULL,cdr_url TEXT NULL,hash_value VARCHAR(255) NULL,qr_data TEXT NULL,response_body LONGTEXT NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY sale_id (sale_id),KEY serie (serie),KEY internal_status (internal_status),KEY signature_status (signature_status),KEY validation_status (validation_status),KEY transport_status (transport_status),KEY beta_status (beta_status),KEY fiscal_status (fiscal_status)) $c;");dbDelta("CREATE TABLE $movements (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,product_id BIGINT UNSIGNED NOT NULL,lot_id BIGINT UNSIGNED NULL,movement_type VARCHAR(40) NOT NULL,quantity INT NOT NULL,previous_stock INT DEFAULT 0,new_stock INT DEFAULT 0,reason TEXT NULL,user_id BIGINT UNSIGNED NULL,created_at DATETIME NOT NULL,PRIMARY KEY (id),KEY product_id (product_id),KEY lot_id (lot_id),KEY movement_type (movement_type)) $c;");}
+    public static function activate() {
+        SPF_Country_Peru::register();
+        $current = sanitize_key((string)get_option(SPF_Config::COUNTRY_OPTION, ''));
+        if (!SPF_Country_Registry::exists($current)) {
+            $countries = SPF_Country_Registry::all();
+            if ($countries) { update_option(SPF_Config::COUNTRY_OPTION, (string)array_key_first($countries)); }
+        }
+        self::create_tables();
+        SPF_Roles::ensure_roles();
+        self::create_app_pages();
+        update_option('spf_install_version', SPF_VERSION);
+    }
+
+    public static function maybe_upgrade() {
+        if ((string)get_option('spf_install_version', '') === SPF_VERSION) { return; }
+        self::create_tables();
+        update_option('spf_install_version', SPF_VERSION);
+    }
+
+    private static function valid_page($id) {
+        $id = absint($id);
+        return $id > 0 && get_post_status($id) !== false && get_post_type($id) === 'page';
+    }
+
+    private static function create_page($option, $legacy_option, $title, $slug, $shortcode) {
+        $current = absint(get_option($option, 0));
+        if (self::valid_page($current)) { return $current; }
+        $legacy = absint(get_option($legacy_option, 0));
+        if (self::valid_page($legacy)) { update_option($option, $legacy); return $legacy; }
+        $existing = get_page_by_path($slug, OBJECT, 'page');
+        if ($existing) { update_option($option, (int)$existing->ID); return (int)$existing->ID; }
+        $id = wp_insert_post([
+            'post_title'=>$title,
+            'post_name'=>$slug,
+            'post_content'=>$shortcode,
+            'post_status'=>'publish',
+            'post_type'=>'page',
+        ], true);
+        if (!is_wp_error($id) && $id) { update_option($option, (int)$id); return (int)$id; }
+        return 0;
+    }
+
+    private static function create_app_pages() {
+        self::create_page('spf_home_page_id','farmapos_home_page_id',__('Sistema para Farmacias','sistema-para-farmacias'),'sistema-farmacias','[spf_home]');
+        self::create_page('spf_pos_page_id','farmapos_pos_page_id',__('Punto de venta','sistema-para-farmacias'),'punto-de-venta','[spf_pos]');
+    }
+
+    private static function create_tables() {
+        global $wpdb;
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        $c = SPF_Database::charset_collate();
+        $products = SPF_Database::table('products');
+        $lots = SPF_Database::table('lots');
+        $movements = SPF_Database::table('stock_movements');
+        $customers = SPF_Database::table('customers');
+        $sales = SPF_Database::table('sales');
+        $sale_items = SPF_Database::table('sale_items');
+        $documents = SPF_Database::table('invoices');
+        $batches = SPF_Database::table('fiscal_batches');
+        $batch_items = SPF_Database::table('fiscal_batch_items');
+
+        dbDelta("CREATE TABLE $products (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            barcode VARCHAR(80) NULL,
+            name VARCHAR(255) NOT NULL,
+            active_ingredient VARCHAR(255) NULL,
+            laboratory VARCHAR(160) NULL,
+            category VARCHAR(160) NULL,
+            purchase_price DECIMAL(12,2) DEFAULT 0,
+            sale_price DECIMAL(12,2) DEFAULT 0,
+            tax_type VARCHAR(30) DEFAULT '',
+            stock_min INT DEFAULT 0,
+            unit VARCHAR(40) DEFAULT 'unidad',
+            status VARCHAR(30) DEFAULT 'active',
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY barcode (barcode),
+            KEY name (name(191))
+        ) $c;");
+
+        dbDelta("CREATE TABLE $lots (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            product_id BIGINT UNSIGNED NOT NULL,
+            lot_number VARCHAR(120) NULL,
+            expiry_date DATE NULL,
+            quantity INT DEFAULT 0,
+            purchase_price DECIMAL(12,2) DEFAULT 0,
+            supplier VARCHAR(255) NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY product_id (product_id),
+            KEY expiry_date (expiry_date)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $customers (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            document_type VARCHAR(20) DEFAULT '',
+            document_number VARCHAR(30) NULL,
+            name VARCHAR(255) NOT NULL,
+            business_name VARCHAR(255) NULL,
+            address TEXT NULL,
+            email VARCHAR(190) NULL,
+            phone VARCHAR(60) NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY document_number (document_number)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $sales (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            sale_number VARCHAR(60) NOT NULL,
+            customer_id BIGINT UNSIGNED NULL,
+            document_type VARCHAR(30) DEFAULT '',
+            payment_method VARCHAR(60) DEFAULT '',
+            subtotal DECIMAL(12,2) DEFAULT 0,
+            igv DECIMAL(12,2) DEFAULT 0,
+            total DECIMAL(12,2) DEFAULT 0,
+            status VARCHAR(30) DEFAULT 'completed',
+            user_id BIGINT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY sale_number (sale_number),
+            KEY customer_id (customer_id)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $sale_items (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            sale_id BIGINT UNSIGNED NOT NULL,
+            product_id BIGINT UNSIGNED NOT NULL,
+            lot_id BIGINT UNSIGNED NULL,
+            product_name VARCHAR(255) NOT NULL,
+            quantity INT NOT NULL,
+            unit_price DECIMAL(12,2) DEFAULT 0,
+            subtotal DECIMAL(12,2) DEFAULT 0,
+            igv DECIMAL(12,2) DEFAULT 0,
+            total DECIMAL(12,2) DEFAULT 0,
+            tax_type VARCHAR(30) DEFAULT '',
+            PRIMARY KEY (id),
+            KEY sale_id (sale_id),
+            KEY product_id (product_id)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $documents (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            sale_id BIGINT UNSIGNED NOT NULL,
+            document_type VARCHAR(30) NOT NULL,
+            serie VARCHAR(20) NULL,
+            correlative VARCHAR(40) NULL,
+            sunat_status VARCHAR(40) DEFAULT 'draft',
+            internal_status VARCHAR(40) DEFAULT 'draft',
+            signature_status VARCHAR(40) DEFAULT 'not_signed',
+            signature_method VARCHAR(255) NULL,
+            signature_certificate_sha256 VARCHAR(64) NULL,
+            signature_xml_sha256 VARCHAR(64) NULL,
+            validation_status VARCHAR(40) DEFAULT 'not_validated',
+            validation_xml_sha256 VARCHAR(64) NULL,
+            transport_status VARCHAR(40) DEFAULT 'not_prepared',
+            beta_status VARCHAR(40) DEFAULT 'not_tested',
+            fiscal_status VARCHAR(40) DEFAULT 'not_sent',
+            fiscal_adapter VARCHAR(80) NULL,
+            fiscal_remote_code VARCHAR(80) NULL,
+            fiscal_remote_message TEXT NULL,
+            pdf_url TEXT NULL,
+            xml_url TEXT NULL,
+            cdr_url TEXT NULL,
+            hash_value VARCHAR(255) NULL,
+            qr_data TEXT NULL,
+            response_body LONGTEXT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY sale_id (sale_id),
+            KEY serie (serie),
+            KEY internal_status (internal_status),
+            KEY signature_status (signature_status),
+            KEY validation_status (validation_status),
+            KEY transport_status (transport_status),
+            KEY beta_status (beta_status),
+            KEY fiscal_status (fiscal_status)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $movements (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            product_id BIGINT UNSIGNED NOT NULL,
+            lot_id BIGINT UNSIGNED NULL,
+            movement_type VARCHAR(40) NOT NULL,
+            quantity INT NOT NULL,
+            previous_stock INT DEFAULT 0,
+            new_stock INT DEFAULT 0,
+            reason TEXT NULL,
+            user_id BIGINT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY product_id (product_id),
+            KEY lot_id (lot_id),
+            KEY movement_type (movement_type)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $batches (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            country_code VARCHAR(12) NOT NULL,
+            batch_type VARCHAR(40) NOT NULL,
+            reference_date DATE NOT NULL,
+            issue_date DATE NOT NULL,
+            sequence INT UNSIGNED NOT NULL,
+            identifier VARCHAR(100) NOT NULL,
+            builder VARCHAR(80) NOT NULL,
+            internal_status VARCHAR(40) DEFAULT 'prepared',
+            signature_status VARCHAR(40) DEFAULT 'not_signed',
+            validation_status VARCHAR(40) DEFAULT 'not_validated',
+            transport_status VARCHAR(40) DEFAULT 'not_prepared',
+            beta_status VARCHAR(40) DEFAULT 'not_tested',
+            fiscal_status VARCHAR(40) DEFAULT 'not_sent',
+            line_count INT DEFAULT 0,
+            snapshot_sha256 VARCHAR(64) NOT NULL,
+            snapshot_body LONGTEXT NOT NULL,
+            xml_sha256 VARCHAR(64) NULL,
+            remote_ticket VARCHAR(190) NULL,
+            response_body LONGTEXT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY batch_identifier (country_code,identifier),
+            UNIQUE KEY batch_sequence (country_code,batch_type,reference_date,sequence),
+            UNIQUE KEY batch_snapshot (country_code,batch_type,reference_date,snapshot_sha256),
+            KEY reference_date (reference_date),
+            KEY internal_status (internal_status),
+            KEY fiscal_status (fiscal_status)
+        ) $c;");
+
+        dbDelta("CREATE TABLE $batch_items (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            batch_id BIGINT UNSIGNED NOT NULL,
+            document_id BIGINT UNSIGNED NOT NULL,
+            sale_id BIGINT UNSIGNED NOT NULL,
+            line_number INT UNSIGNED NOT NULL,
+            condition_code VARCHAR(10) DEFAULT '1',
+            snapshot_sha256 VARCHAR(64) NOT NULL,
+            snapshot_body LONGTEXT NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY batch_document (batch_id,document_id),
+            KEY document_condition (document_id,condition_code),
+            KEY sale_id (sale_id)
+        ) $c;");
+    }
 }
