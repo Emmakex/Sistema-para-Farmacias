@@ -215,7 +215,11 @@ final class SPF_Activator {
             builder VARCHAR(80) NOT NULL,
             internal_status VARCHAR(40) DEFAULT 'prepared',
             signature_status VARCHAR(40) DEFAULT 'not_signed',
+            signature_method VARCHAR(255) NULL,
+            signature_certificate_sha256 VARCHAR(64) NULL,
+            signature_xml_sha256 VARCHAR(64) NULL,
             validation_status VARCHAR(40) DEFAULT 'not_validated',
+            validation_xml_sha256 VARCHAR(64) NULL,
             transport_status VARCHAR(40) DEFAULT 'not_prepared',
             beta_status VARCHAR(40) DEFAULT 'not_tested',
             fiscal_status VARCHAR(40) DEFAULT 'not_sent',
@@ -233,6 +237,8 @@ final class SPF_Activator {
             UNIQUE KEY batch_snapshot (country_code,batch_type,reference_date,snapshot_sha256),
             KEY reference_date (reference_date),
             KEY internal_status (internal_status),
+            KEY signature_status (signature_status),
+            KEY validation_status (validation_status),
             KEY fiscal_status (fiscal_status)
         ) $c;");
 
