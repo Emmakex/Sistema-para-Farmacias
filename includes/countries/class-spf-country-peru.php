@@ -31,6 +31,9 @@ final class SPF_Country_Peru {
                         'required_fields'=>['tax_id','legal_name','address'],
                         'tax_id_pattern'=>'/^\d{11}$/',
                     ],
+                    'transport_runtime'=>[
+                        'extension'=>'soap',
+                    ],
                 ],
                 'signature_profile'=>[
                     'signer'=>'xmldsig',
