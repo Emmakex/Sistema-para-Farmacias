@@ -100,9 +100,26 @@ final class SPF_Fiscal_Batch_Lifecycle {
     }
 
     public static function validate_batch($batch_id) {
+        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+        if (!$batch) { return new WP_Error('spf_batch_missing', __('No se encontró el lote fiscal.', 'sistema-para-farmacias')); }
+        if (sanitize_key((string)($batch['signature_status'] ?? '')) !== 'verified') {
+            $error = new WP_Error('spf_batch_validation_unsigned', __('Firma y verifica localmente el lote antes de validarlo.', 'sistema-para-farmacias'));
+            self::store_validation($batch_id, 'validation_error', ['errors'=>[$error->get_error_message()]]);
+            return $error;
+        }
+
         $signed = self::build_signed_payload($batch_id);
         if (is_wp_error($signed)) { self::store_validation($batch_id, 'validation_error', ['errors'=>[$signed->get_error_message()]]); return $signed; }
-        $batch = SPF_Fiscal_Batch_Repository::get($batch_id);
+        $stored_signed_hash = trim((string)($batch['signature_xml_sha256'] ?? ''));
+        $stored_certificate_hash = trim((string)($batch['signature_certificate_sha256'] ?? ''));
+        $current_signed_hash = trim((string)($signed['signed_xml_sha256'] ?? ''));
+        $current_certificate_hash = trim((string)($signed['certificate_sha256'] ?? ''));
+        if ($stored_signed_hash === '' || $stored_certificate_hash === '' || !hash_equals($stored_signed_hash, $current_signed_hash) || !hash_equals($stored_certificate_hash, $current_certificate_hash)) {
+            $error = new WP_Error('spf_batch_signature_evidence_mismatch', __('La firma reconstruida ya no coincide con la evidencia persistida. Firma de nuevo el lote antes de validarlo.', 'sistema-para-farmacias'));
+            self::store_validation($batch_id, 'validation_error', ['errors'=>[$error->get_error_message()]]);
+            return $error;
+        }
+
         $profile = self::validation_profile((string)$batch['batch_type']);
         $validator_code = sanitize_key((string)($profile['validator'] ?? ''));
         $validator = $validator_code !== '' ? SPF_Fiscal_Validator_Registry::get($validator_code) : null;
@@ -125,7 +142,7 @@ final class SPF_Fiscal_Batch_Lifecycle {
         $configured = 0; $valid = 0;
         foreach ($checks as $check) { if ($check !== 'not_configured') { $configured++; } if ($check === 'valid') { $valid++; } }
         $status = !empty($result['ok']) ? (($configured >= 2 && $valid >= 2) ? 'valid_local' : 'partial') : 'validation_error';
-        $result['signed_xml_sha256'] = sanitize_text_field((string)($signed['signed_xml_sha256'] ?? hash('sha256',(string)$signed['xml'])));
+        $result['signed_xml_sha256'] = $current_signed_hash;
         self::store_validation($batch_id, $status, $result);
         $result['validation_status'] = $status;
         return $result;
@@ -140,8 +157,8 @@ final class SPF_Fiscal_Batch_Lifecycle {
         $metadata['local_signature'] = ['status'=>'signature_error','message'=>sanitize_text_field((string)$message),'verified_at'=>current_time('mysql')];
         unset($metadata['local_validation'], $metadata['fiscal_beta']);
         $wpdb->update($table, [
-            'signature_status'=>'signature_error','validation_status'=>'not_validated','validation_xml_sha256'=>'',
-            'transport_status'=>'not_prepared','beta_status'=>'not_tested',
+            'signature_status'=>'signature_error','signature_method'=>'','signature_certificate_sha256'=>'','signature_xml_sha256'=>'',
+            'validation_status'=>'not_validated','validation_xml_sha256'=>'','transport_status'=>'not_prepared','beta_status'=>'not_tested',
             'response_body'=>wp_json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),'updated_at'=>current_time('mysql'),
         ], ['id'=>absint($batch_id)]);
     }
