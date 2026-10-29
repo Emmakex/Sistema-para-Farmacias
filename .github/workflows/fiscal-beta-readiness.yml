@@ -25,8 +25,11 @@ jobs:
           readiness='includes/class-spf-fiscal-beta-readiness.php'
           country='includes/countries/class-spf-country-peru.php'
           main='sistema-para-farmacias.php'
-          grep -Fq "Version: 0.22.0" "$main"
-          grep -Fq "define('SPF_VERSION','0.22.0')" "$main"
+          header_version="$(grep -m1 -E '^[[:space:]]*\*[[:space:]]Version:' "$main" | sed -E 's/.*Version:[[:space:]]*([^[:space:]]+).*/\1/')"
+          constant_version="$(grep -oE "define\('SPF_VERSION','[^']+'\)" "$main" | head -1 | cut -d"'" -f4)"
+          test -n "$header_version"
+          test -n "$constant_version"
+          test "$header_version" = "$constant_version"
           grep -Fq "require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-beta-readiness.php'" "$main"
           grep -Fq 'new SPF_Fiscal_Beta_Readiness' "$main"
           grep -Fq "'runtime_openssl'" "$readiness"
