@@ -57,7 +57,9 @@ final class SPF_Country_Peru {
                             'filename_parameter'=>'nombreArchivoEnviado',
                             'resources'=>'external_official_summary_pack',
                         ],
-                        'remote_operation'=>'pending',
+                        'beta_transport'=>'peru_beta',
+                        'beta_environment'=>'beta',
+                        'remote_operation'=>'async_beta',
                     ],
                 ],
                 'beta_profile'=>[
