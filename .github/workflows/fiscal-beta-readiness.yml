@@ -1,0 +1,81 @@
+name: Fiscal Beta Readiness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax
+        run: |
+          php -l includes/class-spf-fiscal-beta-readiness.php
+          php -l tests/fiscal-beta-readiness-smoke.php
+          php -l sistema-para-farmacias.php
+      - name: Readiness scope smoke
+        run: php tests/fiscal-beta-readiness-smoke.php
+      - name: Readiness coverage invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          readiness='includes/class-spf-fiscal-beta-readiness.php'
+          main='sistema-para-farmacias.php'
+          grep -Fq "Version: 0.21.0" "$main"
+          grep -Fq "define('SPF_VERSION','0.21.0')" "$main"
+          grep -Fq "require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-beta-readiness.php'" "$main"
+          grep -Fq 'new SPF_Fiscal_Beta_Readiness' "$main"
+          grep -Fq "'runtime_openssl'" "$readiness"
+          grep -Fq "'runtime_dom'" "$readiness"
+          grep -Fq "'runtime_zip'" "$readiness"
+          grep -Fq "'runtime_soap'" "$readiness"
+          grep -Fq "'certificate'" "$readiness"
+          grep -Fq "'invoice_xsd'" "$readiness"
+          grep -Fq "'invoice_xsl'" "$readiness"
+          grep -Fq "'batch_xsd'" "$readiness"
+          grep -Fq "'batch_xsl'" "$readiness"
+          grep -Fq "'evidence_store'" "$readiness"
+          grep -Fq "'document_ledger'" "$readiness"
+          grep -Fq "'batch_ledger'" "$readiness"
+          grep -Fq "'invoice_optin'" "$readiness"
+          grep -Fq "'batch_optin'" "$readiness"
+          grep -Fq "'production_guard'" "$readiness"
+          grep -Fq "SPF_Fiscal_Evidence_Manager::status" "$readiness"
+          grep -Fq "SPF_Fiscal_Batch_Lifecycle::validation_resources" "$readiness"
+          grep -Fq "SPF_Fiscal_Document_Remote_Event_Repository::table" "$readiness"
+          grep -Fq "SPF_Fiscal_Batch_Remote_Event_Repository::table" "$readiness"
+      - name: Readiness remains local and secret-safe
+        shell: bash
+        run: |
+          set -euo pipefail
+          readiness='includes/class-spf-fiscal-beta-readiness.php'
+          if grep -En '__soapCall|wp_remote_|curl_exec|fsockopen|stream_socket_client' "$readiness"; then
+            echo 'Readiness diagnostics must not perform network operations'
+            exit 1
+          fi
+          if grep -En 'private_key_pem.*echo|certificate_pem.*echo|SPF_FISCAL_P12_PASSWORD.*echo|SPF_FISCAL_P12_PATH.*echo' "$readiness"; then
+            echo 'Readiness diagnostics must never render fiscal secrets or credential paths'
+            exit 1
+          fi
+          if grep -Fq 'fiscal_status' "$readiness"; then
+            echo 'Readiness diagnostics must not mutate or govern production fiscal status'
+            exit 1
+          fi
+          if grep -RInF 'e-factura.sunat.gob.pe' --include='*.php' .; then
+            echo 'Production fiscal endpoint must remain absent'
+            exit 1
+          fi
+      - name: Readiness is diagnostic only
+        shell: bash
+        run: |
+          set -euo pipefail
+          readiness='includes/class-spf-fiscal-beta-readiness.php'
+          if grep -En '\$wpdb->(insert|update|delete)\(' "$readiness"; then
+            echo 'Readiness diagnostics must not mutate database state'
+            exit 1
+          fi
+          grep -Fq "add_action('admin_notices'" "$readiness"
+          grep -Fq "Factura beta:" "$readiness"
+          grep -Fq "Resumen Diario beta:" "$readiness"
