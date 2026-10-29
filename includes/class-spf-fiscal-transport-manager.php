@@ -33,6 +33,17 @@ final class SPF_Fiscal_Transport_Manager {
         ];
     }
 
+    public static function beta_profile() {
+        $profile = SPF_Config::get('electronic_invoicing.beta_profile', []);
+        return is_array($profile) ? $profile : [];
+    }
+
+    public static function beta_transport() {
+        $profile = self::beta_profile();
+        $code = sanitize_key((string)($profile['transport'] ?? ''));
+        return $code !== '' ? SPF_Fiscal_Transport_Registry::get($code) : null;
+    }
+
     public static function active_transport() {
         $country = SPF_Config::country_code();
         $electronic = SPF_Config::electronic_invoicing();
@@ -150,12 +161,12 @@ final class SPF_Fiscal_Transport_Manager {
             return new WP_Error('spf_beta_cooldown', __('Espera unos segundos antes de ejecutar otra prueba beta.', 'sistema-para-farmacias'));
         }
 
-        $transport = SPF_Fiscal_Transport_Registry::get('peru_beta');
-        if (!$transport) { return new WP_Error('spf_beta_transport_missing', __('El transporte beta Perú no está registrado.', 'sistema-para-farmacias')); }
+        $transport = self::beta_transport();
+        if (!$transport) { return new WP_Error('spf_beta_transport_missing', __('El país activo no tiene un transporte beta registrado.', 'sistema-para-farmacias')); }
         $package = self::build_package($document_id);
         if (is_wp_error($package)) { return $package; }
         if (empty($package['signature_verified'])) {
-            return new WP_Error('spf_beta_signature_required', __('La factura debe tener una firma XMLDSig verificada antes de probar el beta.', 'sistema-para-farmacias'));
+            return new WP_Error('spf_beta_signature_required', __('El comprobante debe tener una firma XMLDSig verificada antes de probar el beta.', 'sistema-para-farmacias'));
         }
 
         $validation = SPF_Fiscal_Validation_Manager::validate_signed_payload($document_id, [
@@ -200,7 +211,7 @@ final class SPF_Fiscal_Transport_Manager {
         $table = SPF_Database::table('invoices');
         $existing = $wpdb->get_var($wpdb->prepare("SELECT response_body FROM $table WHERE id=%d", absint($document_id)));
         $metadata = json_decode((string)$existing, true); $metadata = is_array($metadata) ? $metadata : [];
-        $metadata['sunat_beta'] = [
+        $metadata['fiscal_beta'] = [
             'status'=>sanitize_key($status),
             'remote_code'=>sanitize_text_field((string)($result['remote_code'] ?? '')),
             'remote_message'=>sanitize_text_field((string)($result['remote_message'] ?? ($result['error'] ?? ''))),
@@ -239,7 +250,7 @@ final class SPF_Fiscal_Transport_Manager {
         if (is_wp_error($result)) { $notice=['type'=>'error','message'=>$result->get_error_message()]; }
         else {
             $status=sanitize_key((string)($result['beta_status']??''));
-            $notice=['type'=>$status==='beta_rejected'?'warning':'success','message'=>sprintf(__('Prueba SUNAT beta finalizada: %s. Esto no es una aceptación fiscal de producción.','sistema-para-farmacias'),self::beta_statuses()[$status]??$status)];
+            $notice=['type'=>$status==='beta_rejected'?'warning':'success','message'=>sprintf(__('Prueba beta fiscal finalizada: %s. Esto no es una aceptación fiscal de producción.','sistema-para-farmacias'),self::beta_statuses()[$status]??$status)];
         }
         set_transient(self::NOTICE_PREFIX . get_current_user_id(), $notice, MINUTE_IN_SECONDS); wp_safe_redirect(admin_url('admin.php?page=spf-fiscal')); exit;
     }
