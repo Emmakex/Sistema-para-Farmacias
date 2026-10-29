@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.22.0**.
+La arquitectura fiscal vigente corresponde a **Sistema para Farmacias 0.23.0**.
 
 El sistema mantiene separadas las responsabilidades locales, beta y productivas para impedir que una prueba remota pueda convertirse accidentalmente en autoridad fiscal real.
 
@@ -19,8 +19,9 @@ El sistema mantiene separadas las responsabilidades locales, beta y productivas 
 9. **Evidence Store privado**: conservación verificable de ZIP/XML CDR fuera del webroot.
 10. **Recuperación operativa**: reconstrucción de proyecciones locales desde evidencia ya archivada, sin reenvío.
 11. **Readiness beta**: diagnóstico local fail-closed de precondiciones antes de una aceptación real de pruebas.
-12. **Aceptación beta verificable**: certificación post-prueba de la cadena remota y de la evidencia archivada.
-13. **Resultado fiscal productivo**: reservado para una fase posterior.
+12. **Aceptación beta de factura**: certificación post-prueba del flujo síncrono.
+13. **Aceptación beta de lote**: certificación post-prueba del flujo asíncrono y sus ciclos de polling.
+14. **Resultado fiscal productivo**: reservado para una fase posterior.
 
 ## Estados independientes
 
@@ -86,6 +87,7 @@ revalidación
 → poll_intent
 → getStatus
 → poll_result
+→ [poll_intent → getStatus → poll_result]...
 → archivo CDR
 → evidence_archived
 → proyección del lote
@@ -97,7 +99,7 @@ El ledger `SPF_Fiscal_Batch_Remote_Event_Repository` es append-only y permite re
 
 Las facturas de prueba usan estrategia `single`, código fiscal `01` y `sendBill`.
 
-El flujo desde 0.19.0 es:
+Flujo:
 
 ```text
 firma + validación exactas
@@ -141,7 +143,7 @@ Si la CDR ya quedó archivada pero falla la proyección mutable del comprobante,
 
 La detección usa una consulta agrupada y `evidence_sha256_from_row()`; no reconstruye firma/validación para cada fila. Al pulsar **Recuperar desde ledger**, la autoridad server-side vuelve a ejecutar la comprobación completa antes de modificar la proyección.
 
-## Readiness beta 0.21.0
+## Readiness beta 0.21.0+
 
 `SPF_Fiscal_Beta_Readiness` añade a la pantalla **Fiscal** un diagnóstico local, sin transmisión, con dos alcances independientes:
 
@@ -150,47 +152,88 @@ La detección usa una consulta agrupada y `evidence_sha256_from_row()`; no recon
 
 Cada alcance se declara `LISTO` únicamente cuando pasan todas sus precondiciones. El diagnóstico comprueba runtime, identidad mínima del emisor, firma, proveedor de credenciales, certificado externo, validación XSD/XSL, Evidence Store, ledgers, transportes beta, builder del Resumen Diario, opt-ins independientes y producción bloqueada.
 
-Las reglas territoriales —formato de identificación fiscal y dependencias concretas del transporte— se declaran en el pack activo de país. El core de readiness se limita a evaluar ese contrato.
+Las reglas territoriales se declaran en el pack activo de país. El core de readiness se limita a evaluar ese contrato.
 
-El readiness **no envía**, **no cambia estados**, **no habilita producción** y **no sustituye la validación exacta previa a cada transmisión**. Es únicamente el gate operativo previo a una aceptación beta controlada.
+El readiness **no envía**, **no cambia estados**, **no habilita producción** y **no sustituye la validación exacta previa a cada transmisión**.
 
-## Aceptación beta de factura 0.22.0
+## Aceptación beta de factura 0.22.0+
 
-`SPF_Fiscal_Beta_Invoice_Acceptance` verifica la aceptación real después de una prueba beta de factura sin realizar ninguna nueva transmisión.
-
-La pantalla **Fiscal** muestra automáticamente la última factura que tenga actividad beta y la clasifica como:
-
-- `CERTIFICADA`: toda la cadena de aceptación está completa y coherente;
-- `BLOQUEADA`: falta al menos una condición obligatoria.
+`SPF_Fiscal_Beta_Invoice_Acceptance` verifica una prueba beta de factura ya realizada sin efectuar una nueva transmisión.
 
 La certificación exige simultáneamente:
 
-1. resultado remoto `beta_accepted` o `beta_accepted_with_observation`;
-2. firma XMLDSig `verified` con hash de XML y certificado válidos;
-3. validación `valid_local` aplicada exactamente al mismo XML firmado;
-4. fingerprint actual idéntico al fingerprint del ledger;
-5. presencia de `submit_intent`;
-6. presencia de `response_received`;
-7. presencia de `evidence_archived`;
-8. orden estricto `submit_intent < response_received < evidence_archived`;
-9. hash de request del ledger idéntico al XML firmado;
+1. resultado `beta_accepted` o `beta_accepted_with_observation`;
+2. firma XMLDSig `verified` con hashes válidos;
+3. validación `valid_local` del mismo XML firmado;
+4. fingerprint actual idéntico al ledger;
+5. `submit_intent`;
+6. `response_received`;
+7. `evidence_archived`;
+8. orden `submit_intent < response_received < evidence_archived`;
+9. hash del request idéntico al XML firmado;
 10. hashes ZIP/XML CDR coherentes entre respuesta y archivo;
-11. `cdr.zip`, `cdr.xml` y `manifest.json` archivados con estado `verified`, locator y SHA-256 válidos;
-12. proyección `beta_status` alineada con el resultado remoto archivado;
-13. `fiscal_status = not_sent` para demostrar que la aceptación beta no promovió producción.
+11. `cdr.zip`, `cdr.xml` y `manifest.json` archivados como `verified`;
+12. proyección beta alineada con el resultado archivado;
+13. `fiscal_status = not_sent`.
 
-Un `beta_rejected`, un manifest inválido, una ruptura del orden del ledger, un fingerprint distinto o cualquier promoción de `fiscal_status` bloquean la certificación.
+Un rechazo remoto, manifest inválido, fingerprint distinto, ruptura del orden o promoción del estado productivo bloquean la certificación.
 
-El verificador es **solo lectura**: no escribe base de datos, no llama al transporte, no consume XML/ZIP crudos y no muestra locators privados, certificado, claves ni contraseñas.
+## Aceptación beta de lote 0.23.0
+
+`SPF_Fiscal_Beta_Batch_Acceptance` extiende el mismo principio al flujo asíncrono de lotes.
+
+La pantalla **Fiscal** toma el lote con actividad beta más reciente y muestra `CERTIFICADA` o `BLOQUEADA` sin ejecutar red ni modificar datos.
+
+La certificación exige simultáneamente:
+
+1. resultado `beta_batch_accepted` o `beta_batch_accepted_with_observation`;
+2. firma local `verified` con hashes de XML/certificado válidos;
+3. validación `valid_local` aplicada al XML firmado exacto;
+4. fingerprint actual idéntico al fingerprint del ledger;
+5. `submit_intent` presente;
+6. `ticket_received` presente;
+7. `poll_intent` correspondiente a la consulta final presente;
+8. `poll_result` final presente;
+9. `evidence_archived` presente;
+10. orden estricto `submit_intent < ticket_received < poll_intent final < poll_result final < evidence_archived`;
+11. ticket idéntico en lote, `ticket_received`, `poll_intent`, `poll_result`, `evidence_archived` y proyección mutable;
+12. hash de request ligado al XML firmado;
+13. SHA-256 del ZIP de envío presente en `ticket_received`;
+14. hashes ZIP/XML CDR coherentes entre `poll_result` final y archivo;
+15. `cdr.zip`, `cdr.xml` y `manifest.json` archivados con estado `verified`, locator y SHA-256 válidos;
+16. proyección `fiscal_beta_batch` alineada con estado, ticket y hashes del ledger;
+17. `fiscal_status = not_sent`.
+
+### Polling múltiple
+
+Un ticket puede devolver uno o varios estados intermedios `beta_batch_processing`. El certificador no asume una única consulta: busca el **último `poll_result` final** anterior a `evidence_archived` y exige un `poll_intent` del mismo ticket inmediatamente dentro del tramo posterior a `ticket_received` y anterior a ese resultado final.
+
+Por tanto, este flujo es certificable:
+
+```text
+submit_intent
+→ ticket_received
+→ poll_intent
+→ poll_result (processing)
+→ poll_intent
+→ poll_result (accepted)
+→ evidence_archived
+```
+
+Un lote rechazado, ticket inconsistente, poll final sin intención previa, manifest inválido, proyección mutable desalineada, hashes distintos o cualquier promoción a producción dejan la aceptación `BLOQUEADA`.
+
+El certificador batch es **solo lectura**, country-neutral, no consume bytes XML/ZIP y no muestra locators privados ni material criptográfico.
 
 ## Situaciones deliberadamente bloqueadas
 
-- `response_received` sin `evidence_archived`: no se reenvía automáticamente y requiere reconciliación técnica;
-- evidencia archivada con fingerprint distinto al documento actual: no es recuperable ni certificable;
-- falta de Evidence Store: un resultado beta final no se presenta como final archivado;
-- readiness incompleto: no se considera preparada la aceptación beta del alcance afectado;
-- respuesta beta rechazada: demuestra comunicación remota pero no certifica aceptación;
-- cadena de ledger incompleta o desordenada: no certifica aceptación;
+- respuesta remota sin `evidence_archived`: requiere reconciliación y no certifica aceptación;
+- evidencia con fingerprint distinto al objeto actual: no certifica;
+- falta de Evidence Store: no existe aceptación verificable final;
+- readiness incompleto: no se considera preparado el alcance;
+- respuesta beta rechazada: demuestra comunicación, no aceptación;
+- ticket incoherente entre ledger y proyección: no certifica lote;
+- `poll_result` final sin `poll_intent` previo del mismo ticket: no certifica lote;
+- cadena de ledger incompleta o desordenada: no certifica;
 - endpoint productivo: ausente;
 - credenciales productivas: ausentes;
 - retry/polling automático remoto: ausente.
@@ -223,8 +266,10 @@ CI cubre, entre otros:
 - bloqueo de reenvíos duplicados;
 - ausencia de XML/ZIP crudos en base de datos;
 - UI de recuperación sin N+1 criptográfico;
-- readiness por alcance, local, no transmisor y sin exposición de secretos;
-- certificación de aceptación de factura solo lectura, country-neutral y fail-closed.
+- readiness por alcance, local y sin exposición de secretos;
+- aceptación de factura solo lectura, country-neutral y fail-closed;
+- aceptación batch asíncrona con múltiples polls, ticket consistente y evidencia final verificada;
+- coherencia automática entre versión de cabecera y `SPF_VERSION` en guards heredados.
 
 ## Opt-in beta Perú
 
@@ -244,10 +289,27 @@ define('SPF_FISCAL_BETA_SUMMARY_CONFIRMATION', 'SUNAT_SUMMARY_TEST_ONLY');
 
 Estos flags habilitan exclusivamente el entorno de pruebas.
 
-## Próximo corte
+## Estado de aceptación real
 
-Con 0.22.0 certificado, la primera aceptación beta real de **factura** podrá ejecutarse cuando el readiness de factura aparezca como `LISTA`. Tras la respuesta, el propio panel deberá mostrar `CERTIFICADA`; cualquier `BLOQUEADA` se tratará como evidencia de aceptación incompleta y no como éxito parcial.
+Las capas de readiness y certificación automatizan la comprobación, pero **no constituyen por sí mismas una aceptación beta real**.
 
-Después de cerrar esa aceptación individual, el siguiente corte extenderá el mismo modelo de certificación al flujo asíncrono de **Resumen Diario**, incluyendo `ticket_received`, `poll_intent`, `poll_result` y `evidence_archived`.
+Para obtener evidencia real deberán ejecutarse en una instalación WordPress de pruebas configurada con emisor, certificado externo, XSD/XSL oficiales externos, Evidence Store privado y opt-ins beta.
 
-Producción continuará bloqueada hasta documentar ambas aceptaciones y definir después credenciales productivas externas, idempotencia/reintentos formales, observabilidad, backup/retención y reconciliación operativa.
+La secuencia operativa será:
+
+```text
+Readiness Factura = LISTA
+→ ejecutar factura beta
+→ Aceptación Factura = CERTIFICADA
+→ Readiness Resumen Diario = LISTO
+→ ejecutar lote beta y consultar ticket hasta final
+→ Aceptación Lote = CERTIFICADA
+```
+
+Solo cuando ambas cadenas reales queden certificadas podremos considerar cerrada la aceptación beta técnica de esta arquitectura.
+
+## Próximo paso
+
+Tras certificar 0.23.0 en repositorio, el siguiente paso no es habilitar producción: es desplegar esta versión en la instalación de pruebas y ejecutar la aceptación beta controlada de **factura** y **Resumen Diario**. Si alguno de los paneles queda `BLOQUEADA`, el fallo deberá resolverse sobre la evidencia concreta antes de avanzar.
+
+Producción continuará bloqueada hasta disponer de ambas aceptaciones reales y definir por separado credenciales productivas externas, idempotencia/reintentos formales, observabilidad, backup/retención y reconciliación operativa.
