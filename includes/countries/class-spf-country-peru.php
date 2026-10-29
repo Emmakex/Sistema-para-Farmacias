@@ -17,8 +17,8 @@ final class SPF_Country_Peru {
             'business_documents'=>['RUC'=>__('RUC','sistema-para-farmacias')],
             'payment_methods'=>['efectivo'=>__('Efectivo','sistema-para-farmacias'),'tarjeta'=>__('Tarjeta','sistema-para-farmacias'),'yape'=>'Yape','plin'=>'Plin','transferencia'=>__('Transferencia','sistema-para-farmacias'),'mixto'=>__('Mixto','sistema-para-farmacias')],
             'sales_documents'=>[
-                'boleta'=>['label'=>__('Boleta','sistema-para-farmacias'),'kind'=>'receipt','requires_business_document'=>false,'default_series'=>'B001','legacy_series_option'=>'farmapos_receipt_series','fiscal_submission'=>'daily_summary'],
-                'factura'=>['label'=>__('Factura','sistema-para-farmacias'),'kind'=>'invoice','requires_business_document'=>true,'business_document_type'=>'RUC','default_series'=>'F001','legacy_series_option'=>'farmapos_invoice_series','fiscal_submission'=>'single'],
+                'boleta'=>['label'=>__('Boleta','sistema-para-farmacias'),'kind'=>'receipt','requires_business_document'=>false,'default_series'=>'B001','legacy_series_option'=>'farmapos_receipt_series','fiscal_submission'=>'daily_summary','fiscal_type_code'=>'03'],
+                'factura'=>['label'=>__('Factura','sistema-para-farmacias'),'kind'=>'invoice','requires_business_document'=>true,'business_document_type'=>'RUC','default_series'=>'F001','legacy_series_option'=>'farmapos_invoice_series','fiscal_submission'=>'single','fiscal_type_code'=>'01'],
             ],
             'electronic_invoicing'=>[
                 'enabled'=>true,
@@ -39,6 +39,12 @@ final class SPF_Country_Peru {
                     'filename_parameter'=>'nombreArchivoEnviado',
                     'resources'=>'external_official_pack',
                     'remote_validation'=>'pending',
+                ],
+                'beta_profile'=>[
+                    'transport'=>'peru_beta',
+                    'scope'=>['factura'],
+                    'environment'=>'beta',
+                    'production_enabled'=>false,
                 ],
             ],
         ]);

@@ -78,14 +78,16 @@ final class SPF_Fiscal_Signing_Manager {
             'remote_validated' => false,
             'verified_at' => current_time('mysql'),
         ];
-        unset($metadata['local_validation']);
+        unset($metadata['local_validation'], $metadata['sunat_beta'], $metadata['fiscal_beta']);
         $updated = $wpdb->update($table, [
             'signature_status' => 'verified',
             'signature_method' => sanitize_text_field((string) ($result['signature_method'] ?? '')),
             'signature_certificate_sha256' => sanitize_text_field((string) ($result['certificate_sha256'] ?? '')),
             'signature_xml_sha256' => sanitize_text_field((string) ($result['signed_xml_sha256'] ?? '')),
             'validation_status' => 'not_validated',
+            'validation_xml_sha256' => '',
             'transport_status' => 'not_prepared',
+            'beta_status' => 'not_tested',
             'response_body' => wp_json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'updated_at' => current_time('mysql'),
         ], ['id' => absint($document_id)]);
@@ -102,11 +104,13 @@ final class SPF_Fiscal_Signing_Manager {
         $metadata = json_decode((string) $existing, true);
         $metadata = is_array($metadata) ? $metadata : [];
         $metadata['local_signature'] = ['status'=>'signature_error','message'=>sanitize_text_field((string)$message),'verified_at'=>current_time('mysql')];
-        unset($metadata['local_validation']);
+        unset($metadata['local_validation'], $metadata['sunat_beta'], $metadata['fiscal_beta']);
         $wpdb->update($table, [
             'signature_status' => 'signature_error',
             'validation_status' => 'not_validated',
+            'validation_xml_sha256' => '',
             'transport_status' => 'not_prepared',
+            'beta_status' => 'not_tested',
             'response_body' => wp_json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'updated_at' => current_time('mysql'),
         ], ['id' => $document_id]);
