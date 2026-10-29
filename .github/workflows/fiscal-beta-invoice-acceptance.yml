@@ -61,7 +61,7 @@ jobs:
             exit 1
           fi
           grep -Fq "=== 'not_sent'" "$acceptance"
-          if grep -En '\$wpdb->update|fiscal_status.*=' "$acceptance"; then
-            echo 'Acceptance verifier must never promote production fiscal status'
+          if grep -En '\$wpdb->(insert|update|delete)\(' "$acceptance"; then
+            echo 'Acceptance verifier must never mutate production fiscal status'
             exit 1
           fi
