@@ -40,6 +40,16 @@ final class SPF_Country_Peru {
                     'resources'=>'external_official_pack',
                     'remote_validation'=>'pending',
                 ],
+                'batch_profiles'=>[
+                    'daily_summary'=>[
+                        'builder'=>'peru_summary_documents',
+                        'ubl_version'=>'2.0',
+                        'customization_id'=>'1.1',
+                        'identifier_prefix'=>'RC',
+                        'preview_sequence'=>1,
+                        'remote_operation'=>'pending',
+                    ],
+                ],
                 'beta_profile'=>[
                     'transport'=>'peru_beta',
                     'scope'=>['factura'],
