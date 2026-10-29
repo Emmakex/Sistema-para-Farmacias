@@ -13,6 +13,7 @@ jobs:
       - name: PHP syntax
         run: |
           php -l includes/class-spf-fiscal-document-remote-event-repository.php
+          php -l includes/class-spf-fiscal-document-recovery-ui.php
           php -l includes/class-spf-fiscal-transport-manager.php
           php -l tests/fiscal-document-remote-ledger-smoke.php
       - name: Document remote ledger smoke
@@ -29,6 +30,8 @@ jobs:
           grep -Fq 'evidence_sha256' "$repo"
           grep -Fq 'latest_archived' "$repo"
           grep -Fq 'latest_response' "$repo"
+          grep -Fq 'recovery_candidates' "$repo"
+          grep -Fq 'evidence_sha256_from_row' "$repo"
           if grep -En '\$wpdb->(update|delete)\(' "$repo"; then
             echo 'Document remote ledger must remain append-only'
             exit 1
@@ -82,6 +85,30 @@ jobs:
           grep -Fq 'admin_post_spf_fiscal_beta_invoice_recover' "$manager"
           grep -Fq 'latest_archived' "$manager"
           grep -Fq 'SPF_Fiscal_Document_Remote_Event_Repository::metadata' "$manager"
+      - name: Operational recovery UI invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          ui='includes/class-spf-fiscal-document-recovery-ui.php'
+          repo='includes/class-spf-fiscal-document-remote-event-repository.php'
+          main='sistema-para-farmacias.php'
+          grep -Fq "require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-document-recovery-ui.php'" "$main"
+          grep -Fq 'new SPF_Fiscal_Document_Recovery_UI' "$main"
+          grep -Fq "add_action('admin_notices'" "$ui"
+          grep -Fq 'SPF_Fiscal_Document_Remote_Event_Repository::recovery_candidates' "$ui"
+          grep -Fq "wp_nonce_field('spf_fiscal_beta_invoice_recover')" "$ui"
+          grep -Fq 'name="action" value="spf_fiscal_beta_invoice_recover"' "$ui"
+          grep -Fq "WHERE e.operation='evidence_archived'" "$repo"
+          grep -Fq 'evidence_sha256_from_row' "$repo"
+          grep -Fq 'hash_equals($stored, $current)' "$repo"
+          if grep -Fq 'recoverable_beta_invoice(' "$ui" || grep -Fq 'build_package(' "$ui" || grep -Fq '$wpdb' "$ui"; then
+            echo 'Recovery UI must not perform per-row cryptographic rebuilds or direct database access'
+            exit 1
+          fi
+          if grep -Fq 'cdr_zip_bytes' "$ui" || grep -Fq 'cdr_xml_bytes' "$ui"; then
+            echo 'Recovery UI must never handle raw fiscal evidence bodies'
+            exit 1
+          fi
       - name: No raw evidence or production promotion
         shell: bash
         run: |
