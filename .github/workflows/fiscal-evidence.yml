@@ -86,9 +86,9 @@ jobs:
         run: |
           set -euo pipefail
           manager='includes/class-spf-fiscal-transport-manager.php'
-          archive_line="$(grep -n 'archive_document_cdr(\$document_id, \$result)' "$manager" | head -1 | cut -d: -f1)"
-          final_store_line="$(grep -n 'store_beta_result(\$document_id, \$status, \$result)' "$manager" | tail -1 | cut -d: -f1)"
-          error_store_line="$(grep -n "store_beta_result(\$document_id, 'beta_evidence_error'" "$manager" | head -1 | cut -d: -f1)"
+          archive_line="$(grep -En 'archive_document_cdr\(\$document_id,[[:space:]]*\$result\)' "$manager" | head -1 | cut -d: -f1)"
+          final_store_line="$(grep -En 'store_beta_result\(\$document_id,[[:space:]]*\$status,[[:space:]]*\$result\)' "$manager" | tail -1 | cut -d: -f1)"
+          error_store_line="$(grep -En "store_beta_result\(\$document_id,[[:space:]]*'beta_evidence_error'" "$manager" | head -1 | cut -d: -f1)"
           test -n "$archive_line" -a -n "$final_store_line" -a "$archive_line" -lt "$final_store_line"
           test -n "$error_store_line"
       - name: Beta remains non-production
