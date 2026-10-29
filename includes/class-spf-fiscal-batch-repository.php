@@ -46,7 +46,8 @@ final class SPF_Fiscal_Batch_Repository {
             $built = $builder->build($context);
             if (is_wp_error($built)) { throw new RuntimeException($built->get_error_message()); }
 
-            $snapshot_hash = self::snapshot_hash($context['lines']);
+            $batch_snapshot = self::batch_snapshot($context);
+            $snapshot_hash = self::snapshot_hash($context['lines'], $batch_snapshot);
             $existing = $wpdb->get_row($wpdb->prepare(
                 "SELECT * FROM $batches WHERE country_code=%s AND batch_type=%s AND reference_date=%s AND snapshot_sha256=%s LIMIT 1",
                 $country, $batch_type, $reference_date, $snapshot_hash
@@ -73,6 +74,7 @@ final class SPF_Fiscal_Batch_Repository {
                 'fiscal_status'=>'not_sent',
                 'line_count'=>(int)$built['line_count'],
                 'snapshot_sha256'=>$snapshot_hash,
+                'snapshot_body'=>wp_json_encode($batch_snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'xml_sha256'=>sanitize_text_field((string)$built['sha256']),
                 'remote_ticket'=>'',
                 'response_body'=>wp_json_encode([
@@ -90,13 +92,15 @@ final class SPF_Fiscal_Batch_Repository {
 
             foreach (array_values($context['lines']) as $index => $line) {
                 $line_snapshot = self::line_snapshot($line);
+                $line_json = wp_json_encode($line_snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $ok = $wpdb->insert($items, [
                     'batch_id'=>$batch_id,
                     'document_id'=>(int)$line['document_id'],
                     'sale_id'=>(int)$line['sale_id'],
                     'line_number'=>$index + 1,
                     'condition_code'=>sanitize_text_field((string)($line['condition_code']??'1')),
-                    'snapshot_sha256'=>hash('sha256', wp_json_encode($line_snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+                    'snapshot_sha256'=>hash('sha256', $line_json),
+                    'snapshot_body'=>$line_json,
                     'created_at'=>$now,
                 ]);
                 if ($ok === false) {
@@ -150,11 +154,12 @@ final class SPF_Fiscal_Batch_Repository {
         ), ARRAY_A);
     }
 
-    public static function snapshot_hash(array $lines) {
+    public static function snapshot_hash(array $lines, array $context_snapshot = []) {
         $snapshots = [];
         foreach ($lines as $line) { $snapshots[] = self::line_snapshot($line); }
         usort($snapshots, function($a,$b){ return ((int)$a['document_id']) <=> ((int)$b['document_id']); });
-        return hash('sha256', wp_json_encode($snapshots, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $payload = ['context'=>$context_snapshot,'lines'=>$snapshots];
+        return hash('sha256', wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
     private static function latest_for_date($country, $batch_type, $reference_date) {
@@ -166,7 +171,23 @@ final class SPF_Fiscal_Batch_Repository {
         ), ARRAY_A);
     }
 
+    private static function batch_snapshot(array $context) {
+        $issuer = (array)($context['issuer'] ?? []);
+        ksort($issuer);
+        return [
+            'batch_type'=>sanitize_key((string)($context['batch_type']??'')),
+            'country_code'=>sanitize_key((string)($context['country_code']??'')),
+            'currency'=>sanitize_text_field((string)($context['currency']??'')),
+            'reference_date'=>sanitize_text_field((string)($context['reference_date']??'')),
+            'issue_date'=>sanitize_text_field((string)($context['issue_date']??'')),
+            'sequence'=>(int)($context['sequence']??1),
+            'issuer'=>$issuer,
+        ];
+    }
+
     private static function line_snapshot(array $line) {
+        $tax_buckets = array_map(function($v){ return round((float)$v,2); }, (array)($line['tax_buckets']??[]));
+        ksort($tax_buckets);
         return [
             'document_id'=>(int)($line['document_id']??0),
             'sale_id'=>(int)($line['sale_id']??0),
@@ -179,7 +200,7 @@ final class SPF_Fiscal_Batch_Repository {
             'subtotal'=>round((float)($line['subtotal']??0),2),
             'tax'=>round((float)($line['tax']??0),2),
             'total'=>round((float)($line['total']??0),2),
-            'tax_buckets'=>array_map(function($v){return round((float)$v,2);},(array)($line['tax_buckets']??[])),
+            'tax_buckets'=>$tax_buckets,
             'condition_code'=>sanitize_text_field((string)($line['condition_code']??'1')),
         ];
     }
