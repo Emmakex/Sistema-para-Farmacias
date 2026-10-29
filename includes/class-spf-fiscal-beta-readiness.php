@@ -18,6 +18,9 @@ final class SPF_Fiscal_Beta_Readiness {
         $batch_transport = SPF_Fiscal_Batch_Beta_Manager::transport('daily_summary');
         $batch_builder = SPF_Fiscal_Batch_Manager::active_builder('daily_summary');
         $beta_profile = SPF_Fiscal_Transport_Manager::beta_profile();
+        $readiness_profile = SPF_Config::get('electronic_invoicing.readiness_profile', []);
+        $readiness_profile = is_array($readiness_profile) ? $readiness_profile : [];
+        $issuer_profile = is_array($readiness_profile['issuer'] ?? null) ? $readiness_profile['issuer'] : [];
 
         $checks = [];
         $checks['runtime_openssl'] = self::check('OpenSSL', extension_loaded('openssl') && function_exists('openssl_pkcs12_read'), __('Extensión OpenSSL disponible.', 'sistema-para-farmacias'), __('OpenSSL/PKCS#12 no está disponible.', 'sistema-para-farmacias'));
@@ -25,10 +28,28 @@ final class SPF_Fiscal_Beta_Readiness {
         $checks['runtime_zip'] = self::check('ZIP', class_exists('ZipArchive'), __('ZipArchive disponible.', 'sistema-para-farmacias'), __('La extensión ZIP de PHP no está disponible.', 'sistema-para-farmacias'));
         $checks['runtime_soap'] = self::check('SOAP', class_exists('SoapClient'), __('SOAP disponible para el transporte beta.', 'sistema-para-farmacias'), __('La extensión SOAP de PHP no está disponible.', 'sistema-para-farmacias'));
 
-        $issuer_ok = preg_match('/^\d{11}$/', (string)($issuer['tax_id'] ?? ''))
-            && trim((string)($issuer['legal_name'] ?? '')) !== ''
-            && trim((string)($issuer['address'] ?? '')) !== '';
-        $checks['issuer'] = self::check(__('Emisor', 'sistema-para-farmacias'), (bool)$issuer_ok, __('RUC, razón social y dirección configurados.', 'sistema-para-farmacias'), __('Completa RUC de 11 dígitos, razón social y dirección del emisor.', 'sistema-para-farmacias'));
+        $required_fields = array_values(array_filter(array_map('sanitize_key', (array)($issuer_profile['required_fields'] ?? []))));
+        $tax_id_pattern = trim((string)($issuer_profile['tax_id_pattern'] ?? ''));
+        $pattern_valid = $tax_id_pattern !== '' && @preg_match($tax_id_pattern, '') !== false;
+        $issuer_profile_ok = !empty($required_fields) && $pattern_valid;
+        $checks['issuer_profile'] = self::check(
+            __('Perfil de identidad fiscal', 'sistema-para-farmacias'),
+            $issuer_profile_ok,
+            __('El país activo define los campos y formato requeridos para el emisor.', 'sistema-para-farmacias'),
+            __('El país activo no define un perfil de identidad fiscal completo para readiness.', 'sistema-para-farmacias')
+        );
+
+        $issuer_ok = $issuer_profile_ok;
+        foreach ($required_fields as $field) {
+            if (trim((string)($issuer[$field] ?? '')) === '') { $issuer_ok = false; break; }
+        }
+        if ($issuer_ok && @preg_match($tax_id_pattern, (string)($issuer['tax_id'] ?? '')) !== 1) { $issuer_ok = false; }
+        $checks['issuer'] = self::check(
+            __('Emisor', 'sistema-para-farmacias'),
+            $issuer_ok,
+            __('Identidad fiscal mínima del emisor configurada según el país activo.', 'sistema-para-farmacias'),
+            __('Completa la identidad fiscal requerida por el perfil del país activo.', 'sistema-para-farmacias')
+        );
 
         $checks['signer'] = self::check(__('Firmador', 'sistema-para-farmacias'), (bool)$signer, __('Firmador XMLDSig registrado.', 'sistema-para-farmacias'), __('No hay firmador XMLDSig activo.', 'sistema-para-farmacias'));
         $checks['credentials_provider'] = self::check(__('Proveedor de certificado', 'sistema-para-farmacias'), (bool)$provider, __('Proveedor externo de credenciales registrado.', 'sistema-para-farmacias'), __('No hay proveedor externo de credenciales registrado.', 'sistema-para-farmacias'));
@@ -59,11 +80,11 @@ final class SPF_Fiscal_Beta_Readiness {
         $checks['production_guard'] = self::check(__('Producción', 'sistema-para-farmacias'), (bool)$production_blocked, __('Producción permanece bloqueada.', 'sistema-para-farmacias'), __('El perfil beta no debe habilitar producción.', 'sistema-para-farmacias'));
 
         $invoice_required = [
-            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer','signer','credentials_provider','certificate','validator',
+            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
             'invoice_xsd','invoice_xsl','evidence_store','document_ledger','invoice_transport','invoice_optin','production_guard',
         ];
         $batch_required = [
-            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer','signer','credentials_provider','certificate','validator',
+            'runtime_openssl','runtime_dom','runtime_zip','runtime_soap','issuer_profile','issuer','signer','credentials_provider','certificate','validator',
             'batch_xsd','batch_xsl','evidence_store','batch_ledger','batch_transport','batch_builder','batch_optin','production_guard',
         ];
 
