@@ -1,0 +1,67 @@
+name: Fiscal Beta Invoice Acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax
+        run: |
+          php -l includes/class-spf-fiscal-beta-invoice-acceptance.php
+          php -l tests/fiscal-beta-invoice-acceptance-smoke.php
+          php -l sistema-para-farmacias.php
+      - name: Acceptance smoke
+        run: php tests/fiscal-beta-invoice-acceptance-smoke.php
+      - name: Acceptance invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          acceptance='includes/class-spf-fiscal-beta-invoice-acceptance.php'
+          main='sistema-para-farmacias.php'
+          grep -Fq "Version: 0.22.0" "$main"
+          grep -Fq "define('SPF_VERSION','0.22.0')" "$main"
+          grep -Fq "require_once SPF_PLUGIN_DIR.'includes/class-spf-fiscal-beta-invoice-acceptance.php'" "$main"
+          grep -Fq 'new SPF_Fiscal_Beta_Invoice_Acceptance' "$main"
+          grep -Fq "'submit_intent'" "$acceptance"
+          grep -Fq "'response_received'" "$acceptance"
+          grep -Fq "'evidence_archived'" "$acceptance"
+          grep -Fq "'production_isolated'" "$acceptance"
+          grep -Fq "'archive_manifest'" "$acceptance"
+          grep -Fq "'request_hash'" "$acceptance"
+          grep -Fq "'cdr_hashes'" "$acceptance"
+      - name: Acceptance remains diagnostic only
+        shell: bash
+        run: |
+          set -euo pipefail
+          acceptance='includes/class-spf-fiscal-beta-invoice-acceptance.php'
+          if grep -En '__soapCall|wp_remote_|curl_exec|fsockopen|stream_socket_client|SoapClient' "$acceptance"; then
+            echo 'Acceptance verifier must not perform network operations'
+            exit 1
+          fi
+          if grep -En '\$wpdb->(insert|update|delete)\(' "$acceptance"; then
+            echo 'Acceptance verifier must not mutate database state'
+            exit 1
+          fi
+          if grep -En 'cdr_zip_bytes|cdr_xml_bytes|private_key_pem|certificate_pem' "$acceptance"; then
+            echo 'Acceptance verifier must not consume or expose raw fiscal evidence or credentials'
+            exit 1
+          fi
+      - name: Acceptance stays country-neutral and production-safe
+        shell: bash
+        run: |
+          set -euo pipefail
+          acceptance='includes/class-spf-fiscal-beta-invoice-acceptance.php'
+          if grep -En 'SUNAT|\bRUC\b|\bDNI\b|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' "$acceptance"; then
+            echo 'Acceptance verifier must remain country-neutral'
+            exit 1
+          fi
+          grep -Fq "=== 'not_sent'" "$acceptance"
+          if grep -En '\$wpdb->update|fiscal_status.*=' "$acceptance"; then
+            echo 'Acceptance verifier must never promote production fiscal status'
+            exit 1
+          fi
