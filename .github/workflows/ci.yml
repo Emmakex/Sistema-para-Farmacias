@@ -26,6 +26,8 @@ jobs:
         run: php tests/fiscal-beta-smoke.php
       - name: Peru daily summary beta fail-closed smoke
         run: php tests/fiscal-beta-summary-smoke.php
+      - name: Fiscal batch remote ledger recovery smoke
+        run: php tests/fiscal-batch-remote-ledger-smoke.php
       - name: Country-neutral core guard
         shell: bash
         run: |
@@ -178,6 +180,41 @@ jobs:
             echo "Authority-specific beta literals leaked into generic batch manager"
             exit 1
           fi
+      - name: Remote batch evidence ledger invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger='includes/class-spf-fiscal-batch-remote-event-repository.php'
+          manager='includes/class-spf-fiscal-batch-beta-manager.php'
+          ui='admin/views/fiscal.php'
+          main='sistema-para-farmacias.php'
+          grep -Fq "fiscal_batch_remote_events" "$ledger"
+          grep -Fq 'UNIQUE KEY event_uuid' "$ledger"
+          grep -Fq 'evidence_sha256' "$ledger"
+          grep -Fq "operation='ticket_received'" "$ledger"
+          grep -Fq 'wp_generate_uuid4' "$ledger"
+          grep -Fq 'SPF_Fiscal_Batch_Remote_Event_Repository::maybe_install' "$main"
+          grep -Fq 'spf_fiscal_batch_beta_recover_ticket' "$manager"
+          grep -Fq 'recoverable_ticket' "$manager"
+          grep -Fq 'ticket_recovered' "$manager"
+          grep -Fq 'spf_fiscal_batch_beta_recover_ticket' "$ui"
+          if grep -En '\$wpdb->(update|delete)\(' "$ledger"; then
+            echo "Remote event repository must remain append-only"
+            exit 1
+          fi
+          if grep -En 'xml_body|zip_body|content_file|contentFile|snapshot_body' "$ledger"; then
+            echo "Remote event ledger must store evidence hashes, not XML/ZIP bodies"
+            exit 1
+          fi
+          submit_intent_line="$(grep -n "record(\$batch_id, 'submit_intent'" "$manager" | head -1 | cut -d: -f1)"
+          submit_call_line="$(grep -n 'submit_batch(\$package)' "$manager" | head -1 | cut -d: -f1)"
+          ticket_line="$(grep -n "record(\$batch_id, 'ticket_received'" "$manager" | head -1 | cut -d: -f1)"
+          ticket_store_line="$(grep -n 'store_result(\$batch_id, \$status, \$result, true)' "$manager" | head -1 | cut -d: -f1)"
+          poll_intent_line="$(grep -n "record(\$batch_id, 'poll_intent'" "$manager" | head -1 | cut -d: -f1)"
+          poll_call_line="$(grep -n 'poll_batch(\$package)' "$manager" | head -1 | cut -d: -f1)"
+          test -n "$submit_intent_line" -a -n "$submit_call_line" -a "$submit_intent_line" -lt "$submit_call_line"
+          test -n "$ticket_line" -a -n "$ticket_store_line" -a "$ticket_line" -lt "$ticket_store_line"
+          test -n "$poll_intent_line" -a -n "$poll_call_line" -a "$poll_intent_line" -lt "$poll_call_line"
       - name: Fiscal credentials stay outside repository and database
         shell: bash
         run: |
