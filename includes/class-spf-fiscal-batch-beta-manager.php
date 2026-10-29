@@ -93,6 +93,12 @@ final class SPF_Fiscal_Batch_Beta_Manager {
         $transport = self::transport((string)$batch['batch_type']);
         if (!$transport) { return new WP_Error('spf_beta_batch_transport_missing', __('El país activo no define un transporte beta asíncrono para este lote.', 'sistema-para-farmacias')); }
         if (!$transport->batch_enabled()) { return new WP_Error('spf_beta_batch_disabled', __('El transporte beta asíncrono del lote no está habilitado explícitamente.', 'sistema-para-farmacias')); }
+
+        $revalidation = SPF_Fiscal_Batch_Lifecycle::validate_batch($batch_id);
+        if (is_wp_error($revalidation)) { return $revalidation; }
+        if (sanitize_key((string)($revalidation['validation_status'] ?? '')) !== 'valid_local') {
+            return new WP_Error('spf_beta_batch_revalidation_required', __('El XML firmado exacto debe volver a superar XSD y XSL inmediatamente antes del envío beta.', 'sistema-para-farmacias'));
+        }
         $package = self::build_submit_package($batch_id);
         if (is_wp_error($package)) { return $package; }
         $inspection = $transport->inspect_batch($package);
@@ -118,7 +124,9 @@ final class SPF_Fiscal_Batch_Beta_Manager {
             self::store_result($batch_id, 'beta_batch_transport_error', ['error'=>$error->get_error_message()], false);
             return $error;
         }
-        self::store_result($batch_id, $status, $result, true);
+        if (!self::store_result($batch_id, $status, $result, true)) {
+            return new WP_Error('spf_beta_batch_ticket_store', sprintf(__('Se recibió el ticket beta %s pero no pudo persistirse. No reenvíes el lote hasta recuperar esta evidencia.', 'sistema-para-farmacias'), $ticket));
+        }
         return $result;
     }
 
@@ -156,7 +164,9 @@ final class SPF_Fiscal_Batch_Beta_Manager {
         }
         $status = sanitize_key((string)($result['beta_status'] ?? 'beta_batch_transport_error'));
         if (!array_key_exists($status, self::statuses())) { $status = 'beta_batch_transport_error'; }
-        self::store_result($batch_id, $status, $result, false);
+        if (!self::store_result($batch_id, $status, $result, false)) {
+            return new WP_Error('spf_beta_batch_status_store', __('La consulta beta respondió, pero no pudo persistirse su evidencia.', 'sistema-para-farmacias'));
+        }
         return $result;
     }
 
