@@ -1,53 +1,16 @@
 <?php
-
-if (!defined('ABSPATH')) {
-    exit;
-}
-
+if (!defined('ABSPATH')) { exit; }
 final class SPF_Roles {
-    const ACCESS = 'farmapos_access';
-    const SETTINGS = 'farmapos_manage_settings';
-    const PRODUCTS = 'farmapos_manage_products';
-    const INVENTORY = 'farmapos_manage_inventory';
-    const SELL = 'farmapos_sell';
-    const SALES = 'farmapos_view_sales';
-    const REPORTS = 'farmapos_view_reports';
-    const INVOICES = 'farmapos_manage_invoices';
-    const CUSTOMERS = 'farmapos_manage_customers';
-    const USERS = 'farmapos_manage_users';
-
-    public static function all_caps() {
-        return [self::ACCESS,self::SETTINGS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::REPORTS,self::INVOICES,self::CUSTOMERS,self::USERS];
-    }
-
-    public static function role_definitions() {
-        return [
-            'farmapos_admin' => ['name' => __('Administrador · Sistema para Farmacias', 'sistema-para-farmacias'), 'caps' => self::all_caps()],
-            'farmapos_supervisor' => ['name' => __('Supervisor · Sistema para Farmacias', 'sistema-para-farmacias'), 'caps' => [self::ACCESS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::REPORTS,self::INVOICES,self::CUSTOMERS]],
-            'farmapos_pharmacist' => ['name' => __('Responsable farmacéutico', 'sistema-para-farmacias'), 'caps' => [self::ACCESS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::INVOICES,self::CUSTOMERS]],
-            'farmapos_cashier' => ['name' => __('Cajero · Sistema para Farmacias', 'sistema-para-farmacias'), 'caps' => [self::ACCESS,self::SELL,self::CUSTOMERS,self::SALES]],
-            'farmapos_warehouse' => ['name' => __('Almacén · Sistema para Farmacias', 'sistema-para-farmacias'), 'caps' => [self::ACCESS,self::PRODUCTS,self::INVENTORY]],
-        ];
-    }
-
-    public static function ensure_roles() {
-        foreach (self::role_definitions() as $role_key => $role_data) {
-            $caps = ['read' => true];
-            foreach ($role_data['caps'] as $cap) { $caps[$cap] = true; }
-            $role = get_role($role_key);
-            if (!$role) { add_role($role_key, $role_data['name'], $caps); continue; }
-            foreach ($caps as $cap => $grant) { $role->add_cap($cap, $grant); }
-        }
-        $legacy_manager = get_role('farmapos_manager');
-        if ($legacy_manager) {
-            $legacy_manager->add_cap('read', true);
-            foreach (self::all_caps() as $cap) { $legacy_manager->add_cap($cap, true); }
-        }
-        $admin = get_role('administrator');
-        if ($admin) { foreach (self::all_caps() as $cap) { $admin->add_cap($cap, true); } }
-    }
-
-    public static function can_access() {
-        return current_user_can(self::ACCESS) || current_user_can('manage_options');
-    }
+ const ACCESS='farmapos_access'; const SETTINGS='farmapos_manage_settings'; const PRODUCTS='farmapos_manage_products'; const INVENTORY='farmapos_manage_inventory'; const SELL='farmapos_sell'; const SALES='farmapos_view_sales'; const REPORTS='farmapos_view_reports'; const INVOICES='farmapos_manage_invoices'; const CUSTOMERS='farmapos_manage_customers'; const USERS='farmapos_manage_users';
+ public static function all_caps(){return[self::ACCESS,self::SETTINGS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::REPORTS,self::INVOICES,self::CUSTOMERS,self::USERS];}
+ public static function capability_labels(){return[self::ACCESS=>__('Acceder al sistema','sistema-para-farmacias'),self::SETTINGS=>__('Gestionar configuración','sistema-para-farmacias'),self::PRODUCTS=>__('Gestionar productos','sistema-para-farmacias'),self::INVENTORY=>__('Gestionar inventario y lotes','sistema-para-farmacias'),self::SELL=>__('Usar punto de venta','sistema-para-farmacias'),self::SALES=>__('Consultar ventas','sistema-para-farmacias'),self::REPORTS=>__('Consultar reportes','sistema-para-farmacias'),self::INVOICES=>__('Gestionar comprobantes','sistema-para-farmacias'),self::CUSTOMERS=>__('Gestionar clientes','sistema-para-farmacias'),self::USERS=>__('Consultar roles y permisos','sistema-para-farmacias')];}
+ public static function role_definitions(){return[
+  'farmapos_admin'=>['name'=>__('Administrador · Sistema para Farmacias','sistema-para-farmacias'),'description'=>__('Propietario o encargado general con control de configuración, inventario, ventas, comprobantes y usuarios.','sistema-para-farmacias'),'caps'=>self::all_caps()],
+  'farmapos_supervisor'=>['name'=>__('Supervisor · Sistema para Farmacias','sistema-para-farmacias'),'description'=>__('Encargado de operación: ventas, inventario, reportes, clientes y comprobantes.','sistema-para-farmacias'),'caps'=>[self::ACCESS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::REPORTS,self::INVOICES,self::CUSTOMERS]],
+  'farmapos_pharmacist'=>['name'=>__('Responsable farmacéutico','sistema-para-farmacias'),'description'=>__('Responsable técnico con acceso a productos, lotes, vencimientos, inventario, ventas y clientes.','sistema-para-farmacias'),'caps'=>[self::ACCESS,self::PRODUCTS,self::INVENTORY,self::SELL,self::SALES,self::INVOICES,self::CUSTOMERS]],
+  'farmapos_cashier'=>['name'=>__('Cajero · Sistema para Farmacias','sistema-para-farmacias'),'description'=>__('Perfil de caja para vender, registrar clientes y consultar ventas permitidas.','sistema-para-farmacias'),'caps'=>[self::ACCESS,self::SELL,self::CUSTOMERS,self::SALES]],
+  'farmapos_warehouse'=>['name'=>__('Almacén · Sistema para Farmacias','sistema-para-farmacias'),'description'=>__('Perfil para productos, entradas de mercancía, lotes, vencimientos y control de stock.','sistema-para-farmacias'),'caps'=>[self::ACCESS,self::PRODUCTS,self::INVENTORY]],
+ ];}
+ public static function ensure_roles(){global $wpdb,$wp_roles;if(!$wp_roles){$wp_roles=wp_roles();}foreach(self::role_definitions() as $key=>$data){$caps=['read'=>true];foreach($data['caps'] as $cap){$caps[$cap]=true;}$role=get_role($key);if(!$role){add_role($key,$data['name'],$caps);$role=get_role($key);}if($role){foreach($caps as $cap=>$grant){$role->add_cap($cap,$grant);}}if(isset($wp_roles->roles[$key])){$wp_roles->roles[$key]['name']=$data['name'];$wp_roles->role_names[$key]=$data['name'];}}if($wp_roles&&isset($wp_roles->roles)){update_option($wpdb->prefix.'user_roles',$wp_roles->roles);} $legacy=get_role('farmapos_manager');if($legacy){$legacy->add_cap('read',true);foreach(self::all_caps() as $cap){$legacy->add_cap($cap,true);}}$admin=get_role('administrator');if($admin){foreach(self::all_caps() as $cap){$admin->add_cap($cap,true);}}}
+ public static function can_access(){return current_user_can(self::ACCESS)||current_user_can('manage_options');}
 }
