@@ -227,7 +227,7 @@ final class SPF_Activator {
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL,
             PRIMARY KEY (id),
-            UNIQUE KEY identifier (identifier),
+            UNIQUE KEY batch_identifier (country_code,identifier),
             UNIQUE KEY batch_sequence (country_code,batch_type,reference_date,sequence),
             UNIQUE KEY batch_snapshot (country_code,batch_type,reference_date,snapshot_sha256),
             KEY reference_date (reference_date),
