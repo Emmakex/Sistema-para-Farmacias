@@ -71,18 +71,32 @@ final class SPF_Fiscal_Beta_Batch_Acceptance {
         }
         usort($stream, static function($a, $b) { return (int)($a['id'] ?? 0) <=> (int)($b['id'] ?? 0); });
 
-        $submit = null;
-        $ticket_event = null;
         $archive_event = null;
         foreach ($stream as $event) {
-            $operation = sanitize_key((string)($event['operation'] ?? ''));
-            if ($operation === 'submit_intent' && !$submit) { $submit = $event; }
-            if ($operation === 'ticket_received' && !$ticket_event) { $ticket_event = $event; }
-            if ($operation === 'evidence_archived') { $archive_event = $event; }
+            if (sanitize_key((string)($event['operation'] ?? '')) === 'evidence_archived') { $archive_event = $event; }
         }
-
         $archive_status = $archive_event ? sanitize_key((string)($archive_event['beta_status'] ?? '')) : '';
         $archive_ticket = $archive_event ? $ticket_of($archive_event) : '';
+
+        $ticket_event = null;
+        if ($archive_event) {
+            foreach ($stream as $event) {
+                if (sanitize_key((string)($event['operation'] ?? '')) !== 'ticket_received') { continue; }
+                if ($event_id($event) >= $event_id($archive_event)) { continue; }
+                if ($archive_ticket !== '' && $ticket_of($event) !== $archive_ticket) { continue; }
+                $ticket_event = $event;
+            }
+        }
+
+        $submit = null;
+        if ($ticket_event) {
+            foreach ($stream as $event) {
+                if (sanitize_key((string)($event['operation'] ?? '')) !== 'submit_intent') { continue; }
+                if ($event_id($event) >= $event_id($ticket_event)) { continue; }
+                $submit = $event;
+            }
+        }
+
         $final_statuses = ['beta_batch_accepted','beta_batch_accepted_with_observation','beta_batch_rejected'];
         $final_poll = null;
         if ($archive_event) {
@@ -169,7 +183,7 @@ final class SPF_Fiscal_Beta_Batch_Acceptance {
             'signature'=>['ready'=>sanitize_key((string)($batch['signature_status'] ?? '')) === 'verified' && $signature_hash !== '' && $certificate_hash !== '','label'=>'Firma exacta verificable'],
             'validation'=>['ready'=>sanitize_key((string)($batch['validation_status'] ?? '')) === 'valid_local' && $validation_hash !== '' && $signature_hash !== '' && hash_equals($signature_hash, $validation_hash),'label'=>'Validación del XML firmado exacto'],
             'fingerprint'=>['ready'=>$anchor_evidence !== '' && $current_evidence_sha256 !== '' && hash_equals($anchor_evidence, $current_evidence_sha256),'label'=>'Fingerprint actual coincide'],
-            'submit_intent'=>['ready'=>(bool)$submit,'label'=>'submit_intent presente'],
+            'submit_intent'=>['ready'=>(bool)$submit,'label'=>'submit_intent efectivo presente'],
             'ticket_received'=>['ready'=>(bool)$ticket_event,'label'=>'ticket_received presente'],
             'poll_intent'=>['ready'=>(bool)$final_poll_intent,'label'=>'poll_intent final presente'],
             'poll_result'=>['ready'=>(bool)$final_poll,'label'=>'poll_result final presente'],
