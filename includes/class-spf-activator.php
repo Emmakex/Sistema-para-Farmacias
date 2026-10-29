@@ -1,80 +1,27 @@
 <?php
-
-if (!defined('ABSPATH')) {
-    exit;
-}
+if (!defined('ABSPATH')) { exit; }
 
 final class SPF_Activator {
     public static function activate() {
         SPF_Country_Peru::register();
-
-        if (!SPF_Country_Registry::exists(get_option(SPF_Config::COUNTRY_OPTION, ''))) {
-            update_option(SPF_Config::COUNTRY_OPTION, 'pe');
-        }
-
-        self::create_inventory_tables();
+        if (!SPF_Country_Registry::exists(get_option(SPF_Config::COUNTRY_OPTION, ''))) { update_option(SPF_Config::COUNTRY_OPTION, 'pe'); }
+        self::create_tables();
         SPF_Roles::ensure_roles();
         update_option('spf_install_version', SPF_VERSION);
     }
 
-    private static function create_inventory_tables() {
+    private static function create_tables() {
         global $wpdb;
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-        $charset = SPF_Database::charset_collate();
-        $products = SPF_Database::table('products');
-        $lots = SPF_Database::table('lots');
-        $movements = SPF_Database::table('stock_movements');
+        $charset=SPF_Database::charset_collate();
+        $products=SPF_Database::table('products'); $lots=SPF_Database::table('lots'); $movements=SPF_Database::table('stock_movements');
+        $customers=SPF_Database::table('customers'); $sales=SPF_Database::table('sales'); $sale_items=SPF_Database::table('sale_items');
 
-        dbDelta("CREATE TABLE $products (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            barcode VARCHAR(80) NULL,
-            name VARCHAR(255) NOT NULL,
-            active_ingredient VARCHAR(255) NULL,
-            laboratory VARCHAR(160) NULL,
-            category VARCHAR(160) NULL,
-            purchase_price DECIMAL(12,2) DEFAULT 0,
-            sale_price DECIMAL(12,2) DEFAULT 0,
-            tax_type VARCHAR(30) DEFAULT '',
-            stock_min INT DEFAULT 0,
-            unit VARCHAR(40) DEFAULT 'unidad',
-            status VARCHAR(30) DEFAULT 'active',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
-            PRIMARY KEY (id),
-            KEY barcode (barcode),
-            KEY name (name(191))
-        ) $charset;");
-
-        dbDelta("CREATE TABLE $lots (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            product_id BIGINT UNSIGNED NOT NULL,
-            lot_number VARCHAR(120) NULL,
-            expiry_date DATE NULL,
-            quantity INT DEFAULT 0,
-            purchase_price DECIMAL(12,2) DEFAULT 0,
-            supplier VARCHAR(255) NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL,
-            PRIMARY KEY (id),
-            KEY product_id (product_id),
-            KEY expiry_date (expiry_date)
-        ) $charset;");
-
-        dbDelta("CREATE TABLE $movements (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            product_id BIGINT UNSIGNED NOT NULL,
-            lot_id BIGINT UNSIGNED NULL,
-            movement_type VARCHAR(40) NOT NULL,
-            quantity INT NOT NULL,
-            previous_stock INT DEFAULT 0,
-            new_stock INT DEFAULT 0,
-            reason TEXT NULL,
-            user_id BIGINT UNSIGNED NULL,
-            created_at DATETIME NOT NULL,
-            PRIMARY KEY (id),
-            KEY product_id (product_id),
-            KEY lot_id (lot_id),
-            KEY movement_type (movement_type)
-        ) $charset;");
+        dbDelta("CREATE TABLE $products (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,barcode VARCHAR(80) NULL,name VARCHAR(255) NOT NULL,active_ingredient VARCHAR(255) NULL,laboratory VARCHAR(160) NULL,category VARCHAR(160) NULL,purchase_price DECIMAL(12,2) DEFAULT 0,sale_price DECIMAL(12,2) DEFAULT 0,tax_type VARCHAR(30) DEFAULT '',stock_min INT DEFAULT 0,unit VARCHAR(40) DEFAULT 'unidad',status VARCHAR(30) DEFAULT 'active',created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY barcode (barcode),KEY name (name(191))) $charset;");
+        dbDelta("CREATE TABLE $lots (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,product_id BIGINT UNSIGNED NOT NULL,lot_number VARCHAR(120) NULL,expiry_date DATE NULL,quantity INT DEFAULT 0,purchase_price DECIMAL(12,2) DEFAULT 0,supplier VARCHAR(255) NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY product_id (product_id),KEY expiry_date (expiry_date)) $charset;");
+        dbDelta("CREATE TABLE $customers (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,document_type VARCHAR(20) DEFAULT '',document_number VARCHAR(30) NULL,name VARCHAR(255) NOT NULL,business_name VARCHAR(255) NULL,address TEXT NULL,email VARCHAR(190) NULL,phone VARCHAR(60) NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),KEY document_number (document_number)) $charset;");
+        dbDelta("CREATE TABLE $sales (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,sale_number VARCHAR(60) NOT NULL,customer_id BIGINT UNSIGNED NULL,document_type VARCHAR(30) DEFAULT '',payment_method VARCHAR(60) DEFAULT '',subtotal DECIMAL(12,2) DEFAULT 0,igv DECIMAL(12,2) DEFAULT 0,total DECIMAL(12,2) DEFAULT 0,status VARCHAR(30) DEFAULT 'completed',user_id BIGINT UNSIGNED NULL,created_at DATETIME NOT NULL,updated_at DATETIME NOT NULL,PRIMARY KEY (id),UNIQUE KEY sale_number (sale_number),KEY customer_id (customer_id)) $charset;");
+        dbDelta("CREATE TABLE $sale_items (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,sale_id BIGINT UNSIGNED NOT NULL,product_id BIGINT UNSIGNED NOT NULL,lot_id BIGINT UNSIGNED NULL,product_name VARCHAR(255) NOT NULL,quantity INT NOT NULL,unit_price DECIMAL(12,2) DEFAULT 0,subtotal DECIMAL(12,2) DEFAULT 0,igv DECIMAL(12,2) DEFAULT 0,total DECIMAL(12,2) DEFAULT 0,tax_type VARCHAR(30) DEFAULT '',PRIMARY KEY (id),KEY sale_id (sale_id),KEY product_id (product_id)) $charset;");
+        dbDelta("CREATE TABLE $movements (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,product_id BIGINT UNSIGNED NOT NULL,lot_id BIGINT UNSIGNED NULL,movement_type VARCHAR(40) NOT NULL,quantity INT NOT NULL,previous_stock INT DEFAULT 0,new_stock INT DEFAULT 0,reason TEXT NULL,user_id BIGINT UNSIGNED NULL,created_at DATETIME NOT NULL,PRIMARY KEY (id),KEY product_id (product_id),KEY lot_id (lot_id),KEY movement_type (movement_type)) $charset;");
     }
 }
