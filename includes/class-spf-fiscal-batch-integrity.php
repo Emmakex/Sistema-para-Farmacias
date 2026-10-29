@@ -20,10 +20,15 @@ final class SPF_Fiscal_Batch_Integrity {
             if ($actual !== $expected) { return new WP_Error('spf_batch_snapshot_header_mismatch', __('El snapshot de cabecera no coincide con la identidad persistida del lote.', 'sistema-para-farmacias')); }
         }
 
-        $items = SPF_Fiscal_Batch_Repository::items($batch_id);
-        if (count($items) !== (int)($batch['line_count'] ?? 0)) { return new WP_Error('spf_batch_snapshot_count', __('La cantidad de miembros del lote no coincide con su snapshot.', 'sistema-para-farmacias')); }
+        global $wpdb;
+        $items_table = SPF_Database::table('fiscal_batch_items');
+        $items = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $items_table WHERE batch_id=%d ORDER BY line_number ASC,id ASC",
+            absint($batch_id)
+        ), ARRAY_A);
+        if (count((array)$items) !== (int)($batch['line_count'] ?? 0)) { return new WP_Error('spf_batch_snapshot_count', __('La cantidad de miembros del lote no coincide con su snapshot.', 'sistema-para-farmacias')); }
         $lines = [];
-        foreach ($items as $item) {
+        foreach ((array)$items as $item) {
             $line = json_decode((string)($item['snapshot_body'] ?? ''), true);
             if (!is_array($line)) { return new WP_Error('spf_batch_line_snapshot', __('Una línea del lote no contiene un snapshot válido.', 'sistema-para-farmacias')); }
             $encoded = wp_json_encode($line, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -32,6 +37,9 @@ final class SPF_Fiscal_Batch_Integrity {
             }
             if ((int)($line['document_id'] ?? 0) !== (int)($item['document_id'] ?? 0) || (int)($line['sale_id'] ?? 0) !== (int)($item['sale_id'] ?? 0)) {
                 return new WP_Error('spf_batch_line_identity', __('Una línea del snapshot no coincide con su miembro persistido.', 'sistema-para-farmacias'));
+            }
+            if ((string)($line['condition_code'] ?? '') !== (string)($item['condition_code'] ?? '')) {
+                return new WP_Error('spf_batch_line_condition', __('El estado congelado de una línea no coincide con el miembro persistido.', 'sistema-para-farmacias'));
             }
             $lines[] = $line;
         }
