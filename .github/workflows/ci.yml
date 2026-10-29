@@ -26,15 +26,18 @@ jobs:
             echo "$violations"
             exit 1
           fi
-      - name: Fiscal preflight must not transport
+      - name: Fiscal layers remain network-free
         shell: bash
         run: |
           set -euo pipefail
-          violations="$(grep -nE 'wp_remote_|curl_|SoapClient|sendBill|sendSummary' \
+          violations="$(grep -RInE 'wp_remote_|curl_|SoapClient|sendBill|sendSummary|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' \
+            --include='*.php' \
             includes/class-spf-fiscal-manager.php \
-            includes/countries/peru/class-spf-fiscal-adapter-peru.php || true)"
+            includes/class-spf-fiscal-transport-manager.php \
+            includes/fiscal \
+            includes/countries/peru || true)"
           if [ -n "$violations" ]; then
-            echo "Transport code found inside preflight-only fiscal cut:"
+            echo "Real network transport found inside dry-run-only fiscal cut:"
             echo "$violations"
             exit 1
           fi
