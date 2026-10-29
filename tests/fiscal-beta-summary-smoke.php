@@ -78,4 +78,22 @@ if (!empty($transport->inspect_batch($invalidIdentifier)['ok'])) {
     fwrite(STDERR, "Invalid daily summary identifier was accepted\n"); exit(1);
 }
 
+$ticketMethod = new ReflectionMethod(SPF_Fiscal_Transport_Peru_Beta::class, 'extract_ticket');
+$ticketMethod->setAccessible(true);
+$ticket = $ticketMethod->invoke($transport, (object)['ticket'=>'1603506008386']);
+if ($ticket !== '1603506008386') {
+    fwrite(STDERR, "Wrapped sendSummary ticket was not parsed\n"); exit(1);
+}
+
+$statusMethod = new ReflectionMethod(SPF_Fiscal_Transport_Peru_Beta::class, 'extract_status_response');
+$statusMethod->setAccessible(true);
+$status = $statusMethod->invoke($transport, (object)['status'=>(object)['statusCode'=>'98']]);
+if (is_wp_error($status) || ($status['status_code'] ?? '') !== '98' || ($status['content'] ?? '') !== '') {
+    fwrite(STDERR, "Wrapped getStatus processing response was not parsed\n"); exit(1);
+}
+$statusWithContent = $statusMethod->invoke($transport, ['status'=>['statusCode'=>'0','content'=>'ZIP-BYTES']]);
+if (is_wp_error($statusWithContent) || ($statusWithContent['content'] ?? '') !== 'ZIP-BYTES') {
+    fwrite(STDERR, "Wrapped getStatus content was not parsed\n"); exit(1);
+}
+
 echo "fiscal-beta-summary-smoke: ok\n";
