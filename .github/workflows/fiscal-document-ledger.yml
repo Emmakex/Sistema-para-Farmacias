@@ -1,0 +1,106 @@
+name: Fiscal Document Remote Ledger
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  document-ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax
+        run: |
+          php -l includes/class-spf-fiscal-document-remote-event-repository.php
+          php -l includes/class-spf-fiscal-transport-manager.php
+          php -l tests/fiscal-document-remote-ledger-smoke.php
+      - name: Document remote ledger smoke
+        run: php tests/fiscal-document-remote-ledger-smoke.php
+      - name: Append-only repository invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='includes/class-spf-fiscal-document-remote-event-repository.php'
+          main='sistema-para-farmacias.php'
+          grep -Fq 'SPF_Fiscal_Document_Remote_Event_Repository::maybe_install' "$main"
+          grep -Fq 'fiscal_document_remote_events' "$repo"
+          grep -Fq 'event_uuid' "$repo"
+          grep -Fq 'evidence_sha256' "$repo"
+          grep -Fq 'latest_archived' "$repo"
+          grep -Fq 'latest_response' "$repo"
+          if grep -En '\$wpdb->(update|delete)\(' "$repo"; then
+            echo 'Document remote ledger must remain append-only'
+            exit 1
+          fi
+          if grep -Fq 'cdr_zip_bytes' "$repo" || grep -Fq 'cdr_xml_bytes' "$repo"; then
+            echo 'Raw CDR bodies are forbidden in the document ledger'
+            exit 1
+          fi
+      - name: Exact evidence binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='includes/class-spf-fiscal-document-remote-event-repository.php'
+          manager='includes/class-spf-fiscal-transport-manager.php'
+          grep -Fq "'signature_certificate_sha256'" "$manager"
+          grep -Fq "'validation_xml_sha256'" "$manager"
+          grep -Fq "'xml_sha256'" "$manager"
+          grep -Fq "'signature_xml_sha256'=>\$signed_hash" "$repo"
+          grep -Fq "'signature_certificate_sha256'=>\$certificate_hash" "$repo"
+          grep -Fq "'validation_xml_sha256'=>\$validation_hash" "$repo"
+          grep -Fq 'SPF_Fiscal_Document_Remote_Event_Repository::evidence_sha256' "$manager"
+      - name: Remote ordering and duplicate-send guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-transport-manager.php'
+          archived_guard="$(grep -n 'latest_archived(\$document_id,\$evidence)' "$manager" | head -1 | cut -d: -f1)"
+          response_guard="$(grep -n 'has_remote_response(\$document_id,\$evidence)' "$manager" | head -1 | cut -d: -f1)"
+          intent="$(grep -n "record(\$document_id,'submit_intent'" "$manager" | head -1 | cut -d: -f1)"
+          transmit="$(grep -n '\$transport->transmit(\$package)' "$manager" | head -1 | cut -d: -f1)"
+          response="$(grep -n "record(\$document_id,'response_received'" "$manager" | head -1 | cut -d: -f1)"
+          archive="$(grep -n 'archive_document_cdr(\$document_id,\$result)' "$manager" | head -1 | cut -d: -f1)"
+          archived_event="$(grep -n "record(\$document_id,'evidence_archived'" "$manager" | head -1 | cut -d: -f1)"
+          final_store="$(grep -n 'store_beta_result(\$document_id,\$status,\$result)' "$manager" | head -1 | cut -d: -f1)"
+          test -n "$archived_guard" -a -n "$response_guard" -a -n "$intent" -a -n "$transmit"
+          test "$archived_guard" -lt "$transmit"
+          test "$response_guard" -lt "$transmit"
+          test "$intent" -lt "$transmit"
+          test -n "$response" -a "$transmit" -lt "$response"
+          test -n "$archive" -a "$response" -lt "$archive"
+          test -n "$archived_event" -a "$archive" -lt "$archived_event"
+          test -n "$final_store" -a "$archived_event" -lt "$final_store"
+      - name: Projection recovery invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-transport-manager.php'
+          grep -Fq 'recoverable_beta_invoice' "$manager"
+          grep -Fq 'recover_beta_invoice' "$manager"
+          grep -Fq "record(\$document_id,'projection_recovered'" "$manager"
+          grep -Fq 'admin_post_spf_fiscal_beta_invoice_recover' "$manager"
+          grep -Fq 'latest_archived' "$manager"
+          grep -Fq 'SPF_Fiscal_Document_Remote_Event_Repository::metadata' "$manager"
+      - name: No raw evidence or production promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager='includes/class-spf-fiscal-transport-manager.php'
+          repo='includes/class-spf-fiscal-document-remote-event-repository.php'
+          if grep -Fq 'cdr_zip_bytes' "$manager" || grep -Fq 'cdr_xml_bytes' "$manager"; then
+            echo 'Raw CDR bytes must never enter the generic document manager'
+            exit 1
+          fi
+          if grep -En "['\"]fiscal_status['\"]\s*=>" "$manager"; then
+            echo 'Beta document ledger must never write fiscal_status'
+            exit 1
+          fi
+          if grep -En 'SUNAT|MODDATOS|sendBill|e-beta\.sunat\.gob\.pe' "$repo" "$manager"; then
+            echo 'Authority-specific literals leaked outside the country transport'
+            exit 1
+          fi
+          if grep -RInF 'e-factura.sunat.gob.pe' --include='*.php' .; then
+            echo 'Production fiscal endpoint must remain absent'
+            exit 1
+          fi

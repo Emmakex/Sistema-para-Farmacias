@@ -85,12 +85,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          manager='includes/class-spf-fiscal-transport-manager.php'
-          archive_line="$(grep -n 'archive_document_cdr(\$document_id, \$result)' "$manager" | head -1 | cut -d: -f1)"
-          final_store_line="$(grep -n 'store_beta_result(\$document_id, \$status, \$result)' "$manager" | tail -1 | cut -d: -f1)"
-          error_store_line="$(grep -n "store_beta_result(\$document_id, 'beta_evidence_error'" "$manager" | head -1 | cut -d: -f1)"
-          test -n "$archive_line" -a -n "$final_store_line" -a "$archive_line" -lt "$final_store_line"
-          test -n "$error_store_line"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path('includes/class-spf-fiscal-transport-manager.php').read_text(encoding='utf-8')
+          patterns = {
+              'response_received': r"record\(\$document_id\s*,\s*['\"]response_received['\"]",
+              'archive': r"archive_document_cdr\(\$document_id\s*,\s*\$result\)",
+              'evidence_archived': r"record\(\$document_id\s*,\s*['\"]evidence_archived['\"]",
+              'final_projection': r"store_beta_result\(\$document_id\s*,\s*\$status\s*,\s*\$result\)",
+              'evidence_error_projection': r"store_beta_result\(\$document_id\s*,\s*['\"]beta_evidence_error['\"]",
+          }
+          matches = {name: re.search(pattern, text) for name, pattern in patterns.items()}
+          missing = [name for name, match in matches.items() if match is None]
+          if missing:
+              raise SystemExit('Missing invoice evidence invariant(s): ' + ', '.join(missing))
+          order = [
+              matches['response_received'].start(),
+              matches['archive'].start(),
+              matches['evidence_archived'].start(),
+              matches['final_projection'].start(),
+          ]
+          if order != sorted(order) or len(set(order)) != len(order):
+              raise SystemExit('Invoice evidence order must be response_received -> archive -> evidence_archived -> final projection')
+          PY
       - name: Beta remains non-production
         shell: bash
         run: |
