@@ -1,0 +1,55 @@
+name: PHP SOAP Compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  soap-signature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP syntax
+        run: php -l includes/countries/peru/class-spf-fiscal-peru-beta-soap-client.php
+
+      - name: Compatible with pre-8.5 SoapClient signature
+        run: |
+          php -n -r '
+            define("ABSPATH", __DIR__ . "/");
+            class SoapClient {
+              public function __doRequest($request, $location, $action, $version, $one_way = false) {}
+            }
+            require "includes/countries/peru/class-spf-fiscal-peru-beta-soap-client.php";
+            $m = new ReflectionMethod("SPF_Fiscal_Peru_Beta_Soap_Client", "__doRequest");
+            if ($m->getNumberOfParameters() !== 6 || $m->getNumberOfRequiredParameters() !== 4) { exit(1); }
+            echo "pre-8.5-compatible\n";
+          '
+
+      - name: Compatible with PHP 8.5 SoapClient signature
+        run: |
+          php -n -r '
+            define("ABSPATH", __DIR__ . "/");
+            class SoapClient {
+              public function __doRequest(string $request, string $location, string $action, int $version, bool $one_way = false, ?string $uri_parser_class = null): ?string { return null; }
+            }
+            require "includes/countries/peru/class-spf-fiscal-peru-beta-soap-client.php";
+            $m = new ReflectionMethod("SPF_Fiscal_Peru_Beta_Soap_Client", "__doRequest");
+            if ($m->getNumberOfParameters() !== 6 || !$m->hasReturnType() || (string)$m->getReturnType() !== "?string") { exit(1); }
+            echo "php-8.5-compatible\n";
+          '
+
+      - name: Plugin loads compatibility client before Peru beta transport
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('sistema-para-farmacias.php').read_text()
+          compat = "includes/countries/peru/class-spf-fiscal-peru-beta-soap-client.php"
+          transport = "includes/countries/peru/class-spf-fiscal-transport-peru-beta.php"
+          assert compat in src and transport in src
+          assert src.index(compat) < src.index(transport)
+          assert "Version: 0.23.1" in src
+          assert "define('SPF_VERSION','0.23.1')" in src
+          PY
