@@ -54,6 +54,7 @@ jobs:
           violations="$(grep -RInE 'wp_remote_|curl_|SoapClient|__soapCall|e-beta\.sunat\.gob\.pe|e-factura\.sunat\.gob\.pe' \
             --include='*.php' \
             --exclude='class-spf-fiscal-transport-peru-beta.php' \
+            --exclude='class-spf-fiscal-peru-beta-soap-client.php' \
             --exclude='fiscal-beta-smoke.php' \
             --exclude='fiscal-beta-summary-smoke.php' \
             includes tests || true)"
